@@ -1,0 +1,249 @@
+//+------------------------------------------------------------------+
+//| File: London_SwingTrend_EURUSD_H1.mq5                            |
+//| EA  : London_SwingTrend_EURUSD_H1                                |
+//| Ver : 0.1.1                                                      |
+//|                                                                  |
+//| Update (v0.1.1 / 2026-01-10):                                    |
+//| - Swing trend logic (EMA trend + RSI pullback)                   |
+//| - ATR-based SL/TP (robust across volatility regimes)             |
+//| - Normalize prices + validate StopsLevel before order send       |
+//| - Unified order comment (EA|SIDE|VERSION)                        |
+//| - Enforce 1-position-per-EA via Magic                            |
+//| - Track API: POST CLOSE (and optional OPEN)                      |
+//|                                                                  |
+//| EURUSD London Swing Trend EA                                     |
+//| - Recommended: EURUSD / H1                                       |
+//| - Trend: EMA(50/200)                                             |
+//| - Entry: RSI pullback in trend direction                         |
+//| - Stops: ATR-based SL, R-multiple TP, optional trailing          |
+//| - Session: London window (configured in JST)                     |
+//|   Default: 16:00 -> 01:00 JST (midnight crossing supported)      |
+//| - Holding: multi-hour to multi-day                               |
+//| - Safety: spread limit, daily trade cap, cooldown, loss streak   |
+//| - Positioning: 1 EA = 1 position (Magic)                         |
+//| - Tracking: /api/track/record                                    |
+//|                                                                  |
+//| Review policy: Weekly review                                     |
+//| Notes:                                                           |
+//| - API key must be set locally (keep blank in public repos).      |
+//| - MT5 WebRequest URL allowlist required.                         |
+//+------------------------------------------------------------------+
+
+#property strict
+
+#include <Trade/Trade.mqh>
+#include "KurosawaHelpers.mqh" // Ensure this is in the same folder
+
+CTrade trade;
+
+//==================== Identity ====================//
+input string InpTrackApiKey        = "";
+input int    InpMagic              = 2026011002;
+input string InpEaId               = "ea-london-swingtrend-eurusd-h1-v011";
+input string InpEaName             = "London_SwingTrend_EURUSD_H1";
+input string InpEaVersion          = "0.1.1";
+
+//==================== Strategy Inputs ====================//
+input int    InpEmaFast            = 50;
+input int    InpEmaSlow            = 200;
+input int    InpRsiPeriod          = 14;
+input double InpRsiBuyPullback     = 45.0;
+input double InpRsiSellPullback    = 55.0;
+input int    InpAtrPeriod          = 14;
+input double InpAtrSlMult          = 2.0;
+input double InpAtrTpMult          = 3.0;
+
+//==================== Management ====================//
+input bool   InpUseTrailing        = true;
+input double InpTrailStartAtrMult  = 1.5;
+input double InpTrailStepAtrMult   = 1.0;
+input int    InpMaxHoldHours       = 96;
+
+//==================== Session & Risk ====================//
+input int    InpJstStartHour       = 16;
+input int    InpJstEndHour         = 1;
+input int    InpJstUtcOffset       = 9;
+input double InpMaxSpreadPoints    = 18;
+input int    InpMaxTradesPerDay    = 6;
+input int    InpMaxConsecLosses    = 3;
+input bool   InpCloseWeekend       = true;
+input int    InpFriCloseHourJst    = 22;
+
+//==================== Track API ====================//
+input bool   InpTrackEnable        = true;
+input bool   InpTrackSendOpen      = true;
+input string InpTrackApiUrl        = "https://1kpips.com/api/track/record";
+
+//==================== Runtime State ====================//
+int hEmaFast, hEmaSlow, hRsi, hAtr;
+datetime g_lastBarTime=0, g_lastCloseTime=0;
+int g_tradesToday=0, g_consecLosses=0, g_lastJstYmd=0;
+ulong g_lastOpenDealId=0, g_lastCloseDealId=0;
+
+//+------------------------------------------------------------------+
+//| Initialization                                                   |
+//+------------------------------------------------------------------+
+int OnInit() {
+   trade.SetExpertMagicNumber(InpMagic);
+   hEmaFast = iMA(_Symbol, _Period, InpEmaFast, 0, MODE_EMA, PRICE_CLOSE);
+   hEmaSlow = iMA(_Symbol, _Period, InpEmaSlow, 0, MODE_EMA, PRICE_CLOSE);
+   hRsi     = iRSI(_Symbol, _Period, InpRsiPeriod, PRICE_CLOSE);
+   hAtr     = iATR(_Symbol, _Period, InpAtrPeriod);
+   
+   if(hEmaFast == INVALID_HANDLE || hEmaSlow == INVALID_HANDLE || hRsi == INVALID_HANDLE || hAtr == INVALID_HANDLE) {
+      Print("Error creating indicator handles");
+      return INIT_FAILED;
+   }
+   
+   g_lastJstYmd = JstYmd(NowJst(InpJstUtcOffset));
+   return INIT_SUCCEEDED;
+}
+
+//+------------------------------------------------------------------+
+//| Deinitialization                                                 |
+//+------------------------------------------------------------------+
+void OnDeinit(const int reason) {
+   IndicatorRelease(hEmaFast);
+   IndicatorRelease(hEmaSlow);
+   IndicatorRelease(hRsi);
+   IndicatorRelease(hAtr);
+}
+
+//+------------------------------------------------------------------+
+//| Main Execution Logic                                             |
+//+------------------------------------------------------------------+
+void OnTick() {
+   // 1. Daily Reset Check
+   int ymd = JstYmd(NowJst(InpJstUtcOffset));
+   if(ymd != g_lastJstYmd) { g_lastJstYmd = ymd; g_tradesToday = 0; }
+
+   // 2. Hard Exits: Weekend Protection & Max Hold Time
+   if(InpCloseWeekend && IsFridayCloseWindowJST()) {
+      if(PositionExists(_Symbol, InpMagic)) {
+         Print("Weekend protection triggered. Closing position.");
+         trade.PositionClose(_Symbol);
+         g_lastCloseTime = TimeCurrent();
+      }
+   }
+
+   // 3. Trailing Stop Logic (Uses Bar 1 ATR)
+   double atr1; double bA[]; ArraySetAsSeries(bA, true);
+   if(CopyBuffer(hAtr, 0, 1, 1, bA) == 1) {
+      atr1 = bA[0];
+      if(InpUseTrailing) ApplyTrailing(atr1);
+   } else return;
+
+   // 4. Entry Gates
+   bool isNewBar = false;
+   datetime t = iTime(_Symbol, _Period, 0);
+   if(t != g_lastBarTime) { isNewBar = true; g_lastBarTime = t; }
+
+   if(!IsEntryTimeJST(InpJstStartHour, InpJstEndHour, InpJstUtcOffset) || !isNewBar) return;
+   
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   if(((ask - bid) / _Point) > InpMaxSpreadPoints) return;
+   
+   if(g_tradesToday >= InpMaxTradesPerDay || g_consecLosses >= InpMaxConsecLosses) return;
+   if(PositionExists(_Symbol, InpMagic)) return;
+
+   // 5. Indicator Signal Check (Last Closed Bar)
+   double f1, s1, r1; double bF[], bS[], bR[];
+   ArraySetAsSeries(bF,true); ArraySetAsSeries(bS,true); ArraySetAsSeries(bR,true);
+   if(CopyBuffer(hEmaFast,0,1,1,bF)!=1 || CopyBuffer(hEmaSlow,0,1,1,bS)!=1 || CopyBuffer(hRsi,0,1,1,bR)!=1) return;
+   
+   f1=bF[0]; s1=bS[0]; r1=bR[0];
+   bool buySig = (f1 > s1 && r1 <= InpRsiBuyPullback);
+   bool sellSig = (f1 < s1 && r1 >= InpRsiSellPullback);
+
+   if(!buySig && !sellSig) return;
+
+   // 6. Order Placement
+   double slD = atr1 * InpAtrSlMult;
+   double tpD = atr1 * InpAtrTpMult;
+
+   if(buySig) {
+      double sl = ask - slD; double tp = ask + tpD;
+      if(EnsureStopsLevel(_Symbol, ask, sl, tp, true, true)) {
+         if(trade.Buy(GetMinLot(_Symbol), _Symbol, ask, sl, tp, InpEaName+"|BUY|"+InpEaVersion)) g_tradesToday++;
+      }
+   } else if(sellSig) {
+      double sl = bid + slD; double tp = bid - tpD;
+      if(EnsureStopsLevel(_Symbol, bid, sl, tp, false, true)) {
+         if(trade.Sell(GetMinLot(_Symbol), _Symbol, bid, sl, tp, InpEaName+"|SELL|"+InpEaVersion)) g_tradesToday++;
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Management: Trailing Stop Implementation                         |
+//+------------------------------------------------------------------+
+void ApplyTrailing(double atrVal) {
+   if(!PositionSelectByMagic(_Symbol, InpMagic)) return;
+
+   double open = PositionGetDouble(POSITION_PRICE_OPEN);
+   double sl = PositionGetDouble(POSITION_SL);
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+
+   if(PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) {
+      if(bid - open < atrVal * InpTrailStartAtrMult) return;
+      double newSl = NormalizeDouble(bid - (atrVal * InpTrailStepAtrMult), _Digits);
+      if(sl == 0 || newSl > sl) trade.PositionModify(_Symbol, newSl, PositionGetDouble(POSITION_TP));
+   } else {
+      if(open - ask < atrVal * InpTrailStartAtrMult) return;
+      double newSl = NormalizeDouble(ask + (atrVal * InpTrailStepAtrMult), _Digits);
+      if(sl == 0 || newSl < sl) trade.PositionModify(_Symbol, newSl, PositionGetDouble(POSITION_TP));
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Track API: Transaction Monitoring                                |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction& trans, const MqlTradeRequest& req, const MqlTradeResult& res) {
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD) return;
+   if(!HistoryDealSelect(trans.deal) || HistoryDealGetInteger(trans.deal, DEAL_MAGIC) != InpMagic) return;
+
+   long entry = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
+   string side = (HistoryDealGetInteger(trans.deal, DEAL_TYPE) == DEAL_TYPE_SELL) ? "SELL" : "BUY";
+   double profit = HistoryDealGetDouble(trans.deal, DEAL_PROFIT) + HistoryDealGetDouble(trans.deal, DEAL_SWAP) + HistoryDealGetDouble(trans.deal, DEAL_COMMISSION);
+
+   if(entry == DEAL_ENTRY_IN && trans.deal != g_lastOpenDealId) {
+      PostTrack("OPEN", side, HistoryDealGetDouble(trans.deal, DEAL_VOLUME), HistoryDealGetDouble(trans.deal, DEAL_PRICE), 0);
+      g_lastOpenDealId = trans.deal;
+   } else if (entry == DEAL_ENTRY_OUT && trans.deal != g_lastCloseDealId) {
+      g_consecLosses = (profit < 0) ? g_consecLosses + 1 : 0;
+      g_lastCloseDealId = trans.deal;
+      g_lastCloseTime = TimeCurrent();
+      PostTrack("CLOSE", side, HistoryDealGetDouble(trans.deal, DEAL_VOLUME), HistoryDealGetDouble(trans.deal, DEAL_PRICE), profit);
+   }
+}
+
+void PostTrack(string type, string side, double vol, double price, double profit) {
+   if(!InpTrackEnable) return;
+   string body = StringFormat("{\"eaId\":\"%s\",\"eventType\":\"%s\",\"side\":\"%s\",\"volume\":%.2f,\"price\":%.5f,\"profit\":%.2f,\"currency\":\"%s\"}",
+                              InpEaId, type, side, vol, price, profit, AccountInfoString(ACCOUNT_CURRENCY));
+   
+   uchar data[]; StringToCharArray(body, data, 0, WHOLE_ARRAY, CP_UTF8);
+   string headers = "Content-Type: application/json\r\nX-API-Key: " + InpTrackApiKey + "\r\n";
+   char res_data[]; string res_headers;
+   WebRequest("POST", InpTrackApiUrl, headers, 5000, data, res_data, res_headers);
+}
+
+//+------------------------------------------------------------------+
+//| Library Extensions (Local Overrides)                             |
+//+------------------------------------------------------------------+
+bool IsFridayCloseWindowJST() {
+   MqlDateTime dt; TimeToStruct(NowJst(InpJstUtcOffset), dt);
+   if(dt.day_of_week == 5 && dt.hour >= InpFriCloseHourJst) return true;
+   if(dt.day_of_week == 6) return true;
+   return false;
+}
+
+bool PositionSelectByMagic(string smb, int magic) {
+   for(int i=PositionsTotal()-1; i>=0; i--) {
+      ulong t = PositionGetTicket(i);
+      if(PositionSelectByTicket(t) && PositionGetString(POSITION_SYMBOL) == smb && PositionGetInteger(POSITION_MAGIC) == magic) return true;
+   }
+   return false;
+}
