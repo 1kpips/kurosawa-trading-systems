@@ -1,368 +1,363 @@
 //+------------------------------------------------------------------+
 //| File: London_ScalpHigh_EURUSD_M1.mq5                             |
 //| EA  : London_ScalpHigh_EURUSD_M1                                 |
-//| Ver : 0.1.1                                                      |
+//| Ver : 0.1.3-track                                                |
 //|                                                                  |
-//| Update (v0.1.1 / 2026-01-10):                                    |
-//| - Use closed-bar EMA crossover (reduce chop entries)             |
-//| - Normalize SL/TP + validate StopsLevel/FrozenLevel              |
-//| - Enforce 1-position-per-EA via Magic                            |
-//| - Unified order comment: EA|SIDE|VERSION                         |
-//| - Add lightweight debug logs for weekly review                   |
+//| EURUSD London High-Frequency Scalp (M1)                          |
+//| - Entry: EMA(5/13) crossover on CLOSED bars (shift=1/2)          |
+//| - Optional trend filter: Close(1) vs EMA(Trend)(1)               |
+//| - Safety: session gate (JST 16:00 -> 01:00), spread, cooldown,   |
+//|          daily cap, loss streak, 1 position per magic            |
+//| - Execution: market orders (price=0), SL/TP validated            |
+//| - Logging: daily summary + block counters (actionable)           |
+//| - Tracking: OPEN/CLOSE + CSV ledger via KurosawaTrack.mqh        |
 //|                                                                  |
-//| EURUSD London High-Frequency Scalp EA                            |
-//| - Recommended: EURUSD / M1                                       |
-//| - Entry: EMA(5/13) crossover using previous closed bar           |
-//| - Optional filter: EMA(50) trend direction                       |
-//| - Safety: max spread, daily trade cap, cooldown, loss streak     |
-//| - Time: London session (configured in JST: 16:00 -> 01:00 JST)   |
-//| - Positioning: 1 EA = 1 position (Magic)                         |
-//| - Tracking: POST CLOSE (and optional OPEN) to /api/track/record  |
-//|                                                                  |
-//| Notes:                                                           |
-//| - If publishing to GitHub, keep API key empty and set locally.   |
-//| - MT5 WebRequest must be allowlisted in Terminal settings.       |
-//|                                                                  |
-//| Review policy: Weekly review                                     |
+//| Notes                                                            |
+//| - Attach ONLY to EURUSD M1 chart.                                |
+//| - Allow WebRequest URL in MT5 options (tracker uses it).         |
+//| - Do not hardcode API keys in public repos.                      |
 //+------------------------------------------------------------------+
-
 #property strict
 
 #include <Trade/Trade.mqh>
+#include "KurosawaHelpers.mqh"
+#include "KurosawaTrack.mqh"
+
 CTrade trade;
 
 //==================== Identity ====================//
-// NOTE: Clear API key before publishing to GitHub.
-input string InpTrackApiKey        = "";
-
 input int    InpMagic              = 2026011001;
-input string InpEaId               = "ea-london-scalphigh-eurusd";
+input string InpEaId               = "ea-london-scalphigh-eurusd-m1";
 input string InpEaName             = "London_ScalpHigh_EURUSD_M1";
-input string InpEaVersion          = "0.1.1";
+input string InpEaVersion          = "0.1.3";
 
-//==================== Session (London, defined in JST) ====================//
-// London ≒ JST 16:00 → 01:00 (crossing midnight)
+//==================== Session (London expressed in JST) ====================//
+// London ≒ JST 16:00 -> 01:00 (cross-midnight supported)
 input int    InpJstStartHour       = 16;
 input int    InpJstEndHour         = 1;
-input int    InpJstUtcOffsetHours  = 9;
+input int    InpJstUtcOffset       = 9;
 
-//==================== Risk & Operation ====================//
-input double InpSlPips             = 6.0;
-input double InpTpPips             = 8.0;
-
-input int    InpMaxTradesPerDay    = 25;
-input int    InpCooldownMinutes    = 2;
-input int    InpMaxConsecLosses    = 3;
-
-//==================== Execution Guards ====================//
-input double InpMaxSpreadPoints    = 20;   // 0 = disable
-
-//==================== Strategy: EMA Logic ====================//
+//==================== Strategy ====================//
+// EMA crossover on CLOSED bars:
+// - uses bar2 -> bar1 transition (shift=2 and shift=1) for stable signals
 input int    InpEmaFast            = 5;
 input int    InpEmaSlow            = 13;
 
+// Optional direction filter (higher timeframe-like bias using EMA50 on same TF)
 input bool   InpUseTrendFilter     = true;
 input int    InpEmaTrend           = 50;
 
-//==================== Track API ====================//
+//==================== Stops & Targets (pips) ====================//
+input double InpSlPips             = 5.0;
+input double InpTpPips             = 3.0;
+
+//==================== Frequency & Safety ====================//
+input int    InpMaxTradesPerDay    = 25;
+input int    InpCooldownMinutes    = 2;
+
+// Use ONE loss streak variable per EA.
+// We will use tracker-updated g_consecLosses as the single source of truth.
+input int    InpMaxConsecLosses    = 3;
+
+//==================== Execution Guards ====================//
+input double InpMaxSpreadPoints    = 20.0; // 0 = disable
+
+//==================== Tracking ====================//
 input bool   InpTrackEnable        = true;
 input bool   InpTrackSendOpen      = true;
-input string InpTrackApiUrl        = "https://1kpips.com/api/track/record";
-input int    InpHttpTimeoutMs      = 5000;
 
-//==================== Indicator Handles ====================//
-int hEmaFast   = INVALID_HANDLE;
-int hEmaSlow   = INVALID_HANDLE;
-int hEmaTrend  = INVALID_HANDLE;
+//==================== Indicator Handles & Runtime State ====================//
+int hFast  = INVALID_HANDLE;
+int hSlow  = INVALID_HANDLE;
+int hTrend = INVALID_HANDLE;
 
-//==================== Runtime State ====================//
-datetime g_lastBarTime     = 0;
-datetime g_lastCloseTime   = 0;
+datetime g_lastBarTime   = 0;
+datetime g_lastCloseTime = 0;
 
-int      g_tradesToday     = 0;
-int      g_lossStreak      = 0;
-int      g_lastJstYmd      = 0;
+int g_tradesToday = 0;
+int g_lastJstYmd  = 0;
 
-ulong    g_lastDealOpenId  = 0;
-ulong    g_lastDealCloseId = 0;
+// Tracking dedupe guards / shared state
+ulong g_lastOpenDealId   = 0;
+ulong g_lastCloseDealId  = 0;
+int   g_consecLosses     = 0;   // Updated by KurosawaTrack on CLOSE
+// NOTE: This EA uses g_consecLosses only. No separate local loss streak.
 
-//+------------------------------------------------------------------+
-//| Utilities: Time and Date Calculations                            |
-//+------------------------------------------------------------------+
+// Diagnostics (daily)
+int g_diagBars      = 0;
+int g_diagSignal    = 0;
+int g_diagTradeSent = 0;
 
-// Returns current time adjusted to Japan Standard Time (JST)
-datetime NowJst()
-{
-   return TimeGMT() + InpJstUtcOffsetHours * 3600;
-}
-
-// Converts a datetime to an integer YYYYMMDD for daily reset checks
-int JstYmd(datetime t)
-{
-   MqlDateTime d; TimeToStruct(t, d);
-   return d.year*10000 + d.mon*100 + d.day;
-}
-
-// Checks if the current JST time falls within the allowed session window
-bool IsTradingTimeJST()
-{
-   MqlDateTime d; TimeToStruct(NowJst(), d);
-
-   if(InpJstStartHour <= InpJstEndHour)
-      return (d.hour >= InpJstStartHour && d.hour < InpJstEndHour);
-
-   return (d.hour >= InpJstStartHour || d.hour < InpJstEndHour);
-}
+// Block counters (daily, counted per evaluated BAR)
+int g_blockSession   = 0;
+int g_blockSpread    = 0;
+int g_blockMaxDay    = 0;
+int g_blockLoss      = 0;
+int g_blockCooldown  = 0;
+int g_blockHasPos    = 0;
+int g_blockNoSignal  = 0;
+int g_blockStops     = 0;
+int g_blockOrderFail = 0;
 
 //+------------------------------------------------------------------+
-//| Utilities: Trade Execution Helpers                               |
+//| Small local gates                                                |
 //+------------------------------------------------------------------+
-
-// Detects the start of a new candle to prevent multiple trades per bar
-bool IsNewBar()
-{
-   datetime t = iTime(_Symbol, _Period, 0);
-   if(t == g_lastBarTime) return false;
-   g_lastBarTime = t;
-   return true;
-}
-
-// Robust pip-to-price conversion for 5-digit brokers
-double PipsToPrice(double pips)
-{
-   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
-   double pipVal = (digits == 3 || digits == 5) ? 10 * _Point : _Point;
-   return pips * pipVal;
-}
-
-// Filters entries based on current market spread
-bool SpreadOK()
-{
-   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   if(ask <= 0 || bid <= 0) return false;
-   return ((ask - bid) / _Point <= InpMaxSpreadPoints);
-}
-
-// Prevents rapid-fire trading by enforcing a wait period after a close
 bool CooldownOK()
 {
    if(InpCooldownMinutes <= 0) return true;
-   if(g_lastCloseTime <= 0) return true;
-
-   datetime now = TimeCurrent();
-   return (now - g_lastCloseTime) >= (InpCooldownMinutes * 60);
+   if(g_lastCloseTime <= 0)    return true;
+   return (TimeCurrent() - g_lastCloseTime) >= (InpCooldownMinutes * 60);
 }
 
-// Validates SL/TP against broker's minimum StopLevels and FreezeLevels
-bool EnsureStopsLevel(double entry, double &sl, double &tp, bool isBuy)
+bool SpreadOK(const double ask, const double bid)
 {
-   int level = (int)MathMax(SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL), 
-                           SymbolInfoInteger(_Symbol, SYMBOL_TRADE_FREEZE_LEVEL));
-   double minDist = level * _Point;
+   if(InpMaxSpreadPoints <= 0.0) return true;
+   return ((ask - bid) / _Point) <= InpMaxSpreadPoints;
+}
 
-   if(isBuy)
-   {
-      if(sl > 0 && (entry - sl) < minDist) sl = entry - minDist;
-      if(tp > 0 && (tp - entry) < minDist) tp = entry + minDist;
-   }
-   else
-   {
-      if(sl > 0 && (sl - entry) < minDist) sl = entry + minDist;
-      if(tp > 0 && (entry - tp) < minDist) tp = entry - minDist;
-   }
-   
-   sl = (sl > 0 ? NormalizeDouble(sl, _Digits) : 0);
-   tp = (tp > 0 ? NormalizeDouble(tp, _Digits) : 0);
+bool IsNewBar()
+{
+   const datetime bar0 = iTime(_Symbol, PERIOD_M1, 0);
+   if(bar0 == g_lastBarTime) return false;
+   g_lastBarTime = bar0;
    return true;
 }
 
-// Checks if the EA already has a position open (1 position per Magic)
-bool HasOpenPosition()
-{
-   for(int i=PositionsTotal()-1; i>=0; i--)
-   {
-      ulong ticket = PositionGetTicket(i);
-      if(!PositionSelectByTicket(ticket)) continue;
-      if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
-      if(PositionGetInteger(POSITION_MAGIC) != InpMagic) continue;
-      return true;
-   }
-   return false;
-}
-
 //+------------------------------------------------------------------+
-//| Track API: JSON Formatting and WebRequest                        |
+//| Daily summary / reset                                            |
 //+------------------------------------------------------------------+
-
-string JsonEscape(const string s)
+void PrintDailySummary()
 {
-   string x=s;
-   StringReplace(x,"\\","\\\\");
-   StringReplace(x,"\"","\\\"");
-   return x;
-}
-
-bool PostTrack(const string eventType, const string side, const double volume, 
-               const double price, const double profit, const string payload)
-{
-   if(!InpTrackEnable) return true;
-
-   string body = StringFormat(
-      "{\"eaId\":\"%s\",\"eaName\":\"%s\",\"eaVersion\":\"%s\",\"eventType\":\"%s\","
-      "\"symbol\":\"%s\",\"side\":\"%s\",\"volume\":%.2f,\"price\":%.5f,"
-      "\"profit\":%.2f,\"currency\":\"%s\",\"payloadJson\":\"%s\"}",
-      InpEaId, InpEaName, InpEaVersion, eventType, _Symbol, side, volume, price, 
-      profit, AccountInfoString(ACCOUNT_CURRENCY), JsonEscape(payload)
+   PrintFormat(
+      "Daily Summary: Bars=%d Signals=%d Trades=%d | Blocks session=%d spread=%d cooldown=%d haspos=%d loss=%d maxday=%d nosignal=%d stops=%d orderfail=%d",
+      g_diagBars, g_diagSignal, g_diagTradeSent,
+      g_blockSession, g_blockSpread, g_blockCooldown,
+      g_blockHasPos, g_blockLoss, g_blockMaxDay, g_blockNoSignal,
+      g_blockStops, g_blockOrderFail
    );
 
-   uchar data[];
-   int len=StringToCharArray(body,data,0,WHOLE_ARRAY,CP_UTF8);
-   if(len>0) ArrayResize(data,len-1);
-
-   string headers="Content-Type: application/json\r\nX-API-Key: "+InpTrackApiKey+"\r\n";
-   char result[]; string rh;
-
-   int status=WebRequest("POST",InpTrackApiUrl,headers,InpHttpTimeoutMs,data,result,rh);
-   if(status<200 || status>=300) Print("Track API Error: Status ",status);
-
-   return true;
+   // Single loss streak source (tracker-updated)
+   PrintFormat("Streaks | trackConsecLoss=%d", g_consecLosses);
 }
 
-//+------------------------------------------------------------------+
-//| Trade Transaction: Real-time deal monitoring                     |
-//+------------------------------------------------------------------+
-
-void OnTradeTransaction(const MqlTradeTransaction& trans, const MqlTradeRequest& req, const MqlTradeResult& res)
+void ResetDailyIfNeeded()
 {
-   if(trans.type!=TRADE_TRANSACTION_DEAL_ADD) return;
-   if(!HistoryDealSelect(trans.deal)) return;
-   if(HistoryDealGetInteger(trans.deal,DEAL_MAGIC)!=InpMagic) return;
+   const int ymd = JstYmd(NowJst(InpJstUtcOffset));
+   if(ymd == g_lastJstYmd) return;
 
-   long entry = HistoryDealGetInteger(trans.deal,DEAL_ENTRY);
-   long type  = HistoryDealGetInteger(trans.deal,DEAL_TYPE);
-   string side=(type==DEAL_TYPE_SELL?"SELL":"BUY");
+   if(g_lastJstYmd != 0)
+      PrintDailySummary();
 
-   double vol=HistoryDealGetDouble(trans.deal,DEAL_VOLUME);
-   double price=HistoryDealGetDouble(trans.deal,DEAL_PRICE);
+   g_lastJstYmd  = ymd;
+   g_tradesToday = 0;
 
-   // Handle Opening Deals
-   if(entry==DEAL_ENTRY_IN && InpTrackSendOpen && trans.deal!=g_lastDealOpenId)
-   {
-      PostTrack("OPEN",side,vol,price,0,"{}");
-      g_lastDealOpenId=trans.deal;
-   }
+   g_diagBars      = 0;
+   g_diagSignal    = 0;
+   g_diagTradeSent = 0;
 
-   // Handle Closing Deals
-   if(entry==DEAL_ENTRY_OUT && trans.deal!=g_lastDealCloseId)
-   {
-      double p=HistoryDealGetDouble(trans.deal,DEAL_PROFIT)+
-               HistoryDealGetDouble(trans.deal,DEAL_SWAP)+
-               HistoryDealGetDouble(trans.deal,DEAL_COMMISSION);
+   g_blockSession   = 0;
+   g_blockSpread    = 0;
+   g_blockMaxDay    = 0;
+   g_blockLoss      = 0;
+   g_blockCooldown  = 0;
+   g_blockHasPos    = 0;
+   g_blockNoSignal  = 0;
+   g_blockStops     = 0;
+   g_blockOrderFail = 0;
 
-      g_lossStreak = (p < 0 ? g_lossStreak + 1 : 0);
-      g_lastDealCloseId=trans.deal;
-      g_lastCloseTime=TimeCurrent();
-
-      PostTrack("CLOSE",side,vol,price,p,"{}");
-   }
+   // Keep tracker streak across days by default.
+   // If you want a "daily reset" of loss streak instead, uncomment:
+   // g_consecLosses = 0;
 }
 
 //+------------------------------------------------------------------+
-//| Initialization                                                   |
+//| Init / Deinit                                                    |
 //+------------------------------------------------------------------+
-
 int OnInit()
 {
-   trade.SetExpertMagicNumber(InpMagic);
-
-   // Initialize Indicator Handles
-   hEmaFast  = iMA(_Symbol,_Period,InpEmaFast,0,MODE_EMA,PRICE_CLOSE);
-   hEmaSlow  = iMA(_Symbol,_Period,InpEmaSlow,0,MODE_EMA,PRICE_CLOSE);
-   hEmaTrend = iMA(_Symbol,_Period,InpEmaTrend,0,MODE_EMA,PRICE_CLOSE);
-
-   if(hEmaFast==INVALID_HANDLE || hEmaSlow==INVALID_HANDLE || hEmaTrend==INVALID_HANDLE)
+   if(_Period != PERIOD_M1)
    {
-      Print("CRITICAL: Failed to create indicator handles.");
+      Print("CRITICAL: Attach this EA to an M1 chart.");
       return INIT_FAILED;
    }
 
-   g_lastJstYmd = JstYmd(NowJst());
+   trade.SetExpertMagicNumber(InpMagic);
+
+   hFast  = iMA(_Symbol, PERIOD_M1, InpEmaFast, 0, MODE_EMA, PRICE_CLOSE);
+   hSlow  = iMA(_Symbol, PERIOD_M1, InpEmaSlow, 0, MODE_EMA, PRICE_CLOSE);
+   hTrend = (InpUseTrendFilter ? iMA(_Symbol, PERIOD_M1, InpEmaTrend, 0, MODE_EMA, PRICE_CLOSE) : INVALID_HANDLE);
+
+   if(hFast == INVALID_HANDLE || hSlow == INVALID_HANDLE || (InpUseTrendFilter && hTrend == INVALID_HANDLE))
+   {
+      Print("CRITICAL: Failed to create EMA handles.");
+      return INIT_FAILED;
+   }
+
+   g_lastJstYmd = JstYmd(NowJst(InpJstUtcOffset));
    return INIT_SUCCEEDED;
 }
 
-//+------------------------------------------------------------------+
-//| OnTick: Main Execution Logic                                     |
-//+------------------------------------------------------------------+
+void OnDeinit(const int reason)
+{
+   if(hFast  != INVALID_HANDLE) IndicatorRelease(hFast);
+   if(hSlow  != INVALID_HANDLE) IndicatorRelease(hSlow);
+   if(hTrend != INVALID_HANDLE) IndicatorRelease(hTrend);
 
+   // Print summary when EA is removed (useful during testing)
+   PrintDailySummary();
+}
+
+//+------------------------------------------------------------------+
+//| OnTick                                                           |
+//+------------------------------------------------------------------+
 void OnTick()
 {
-   // 1. Daily Reset Check
-   int ymd=JstYmd(NowJst());
-   if(ymd!=g_lastJstYmd)
+   // 0) Daily reset
+   ResetDailyIfNeeded();
+
+   // 1) New bar gate first (so block counters are per evaluated bar)
+   if(!IsNewBar()) return;
+   g_diagBars++;
+
+   // 2) Session gate (JST window; can cross midnight)
+   if(!IsEntryTimeJST(InpJstStartHour, InpJstEndHour, InpJstUtcOffset))
    {
-      g_lastJstYmd=ymd;
-      g_tradesToday=0;
-      g_lossStreak=0;
+      g_blockSession++;
+      return;
    }
 
-   // 2. Execution Gates (Safety Checks)
-   if(!IsTradingTimeJST()) return;
-   if(!SpreadOK()) return;
-   if(!IsNewBar()) return; // Entry logic only runs once per candle close
-   if(g_tradesToday >= InpMaxTradesPerDay) return;
-   if(!CooldownOK()) return;
-   if(g_lossStreak >= InpMaxConsecLosses) return;
-   if(HasOpenPosition()) return;
+   // 3) Quote & spread gate
+   const double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   const double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   if(ask <= 0.0 || bid <= 0.0) return;
 
-   // 3. Signal Calculation (Using closed bars: index 1 and 2)
-   double ef[2], es[2], et[1];
-   if(CopyBuffer(hEmaFast,0,1,2,ef)!=2) return;
-   if(CopyBuffer(hEmaSlow,0,1,2,es)!=2) return;
-   if(CopyBuffer(hEmaTrend,0,1,1,et)!=1) return;
-
-   // Crossover logic: Bar 2 was outside, Bar 1 (newest closed) crossed over
-   bool crossUp   = (ef[1] > es[1] && ef[0] < es[0]); 
-   bool crossDown = (ef[1] < es[1] && ef[0] > es[0]);
-
-   // Trend Filter: Price vs EMA Trend on last closed bar
-   bool trendUp   = (iClose(_Symbol,_Period,1) > et[0]);
-   bool trendDown = (iClose(_Symbol,_Period,1) < et[0]);
-
-   // 4. Execution Prices and Volumes
-   double lot=SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN); 
-   double slD=PipsToPrice(InpSlPips);
-   double tpD=PipsToPrice(InpTpPips);
-
-   string cmtBase = InpEaName + "|" + InpEaVersion;
-
-   // 5. Final Entry Logic
-   if(crossUp && (!InpUseTrendFilter || trendUp))
+   if(!SpreadOK(ask, bid))
    {
-      double ask=SymbolInfoDouble(_Symbol,SYMBOL_ASK);
-      double sl = ask - slD; double tp = ask + tpD;
-      
-      if(EnsureStopsLevel(ask, sl, tp, true))
+      g_blockSpread++;
+      return;
+   }
+
+   // 4) Risk gates
+   if(g_tradesToday >= InpMaxTradesPerDay) { g_blockMaxDay++; return; }
+   if(g_consecLosses >= InpMaxConsecLosses){ g_blockLoss++; return; }
+   if(!CooldownOK())                      { g_blockCooldown++; return; }
+   if(PositionExists(_Symbol, InpMagic))   { g_blockHasPos++; return; }
+
+   // 5) Read EMAs from CLOSED bars
+   // shift=1,count=2 => f[0]=bar1, f[1]=bar2
+   double f[2], s[2];
+   if(CopyBuffer(hFast, 0, 1, 2, f) != 2) return;
+   if(CopyBuffer(hSlow, 0, 1, 2, s) != 2) return;
+
+   // Closed-bar crossover (bar2 -> bar1)
+   const bool crossUp   = (f[1] <= s[1] && f[0] > s[0]);
+   const bool crossDown = (f[1] >= s[1] && f[0] < s[0]);
+
+   if(!crossUp && !crossDown)
+   {
+      g_blockNoSignal++;
+      return;
+   }
+   g_diagSignal++;
+
+   // 6) Optional trend filter (Close(1) vs EMAtrend(1))
+   bool trendUp = true, trendDown = true;
+   if(InpUseTrendFilter)
+   {
+      double t[1];
+      if(CopyBuffer(hTrend, 0, 1, 1, t) != 1) return;
+
+      const double close1 = iClose(_Symbol, PERIOD_M1, 1);
+      trendUp   = (close1 > t[0]);
+      trendDown = (close1 < t[0]);
+   }
+
+   // 7) SL/TP distances
+   const double slDist = PipsToPrice(_Symbol, InpSlPips);
+   const double tpDist = PipsToPrice(_Symbol, InpTpPips);
+   if(slDist <= 0.0 || tpDist <= 0.0) return;
+
+   // 8) Fixed baseline lot (min lot) for HFT stability
+   const double lot = GetMinLot(_Symbol);
+   const string cmtBase = InpEaName + "|" + InpEaVersion;
+
+   // 9) Execute (market), validate stops/freeze levels
+   if(crossUp && trendUp)
+   {
+      double sl = NormalizeDouble(ask - slDist, _Digits);
+      double tp = NormalizeDouble(ask + tpDist, _Digits);
+
+      if(!EnsureStopsLevel(_Symbol, ask, sl, tp, true, true))
       {
-         if(trade.Buy(lot, _Symbol, ask, sl, tp, cmtBase + "|BUY"))
-         {
-            g_tradesToday++;
-            PrintFormat("Scalp BUY Sent: SL %.5f TP %.5f", sl, tp);
-         }
+         g_blockStops++;
+         return;
       }
-   }
-   else if(crossDown && (!InpUseTrendFilter || trendDown))
-   {
-      double bid=SymbolInfoDouble(_Symbol,SYMBOL_BID);
-      double sl = bid + slD; double tp = bid - tpD;
 
-      if(EnsureStopsLevel(bid, sl, tp, false))
+      if(!trade.Buy(lot, _Symbol, 0, sl, tp, cmtBase + "|BUY"))
       {
-         if(trade.Sell(lot, _Symbol, bid, sl, tp, cmtBase + "|SELL"))
-         {
-            g_tradesToday++;
-            PrintFormat("Scalp SELL Sent: SL %.5f TP %.5f", sl, tp);
-         }
+         g_blockOrderFail++;
+         return;
       }
+
+      g_tradesToday++;
+      g_diagTradeSent++;
    }
+   else if(crossDown && trendDown)
+   {
+      double sl = NormalizeDouble(bid + slDist, _Digits);
+      double tp = NormalizeDouble(bid - tpDist, _Digits);
+
+      if(!EnsureStopsLevel(_Symbol, bid, sl, tp, false, true))
+      {
+         g_blockStops++;
+         return;
+      }
+
+      if(!trade.Sell(lot, _Symbol, 0, sl, tp, cmtBase + "|SELL"))
+      {
+         g_blockOrderFail++;
+         return;
+      }
+
+      g_tradesToday++;
+      g_diagTradeSent++;
+   }
+   else
+   {
+      // Cross happened but trend filter blocked it
+      g_blockNoSignal++;
+      return;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Transaction Monitoring & Tracking (via KurosawaTrack.mqh)         |
+//| - Keep this wrapper identical across EAs                          |
+//| - Let the tracker update loss streak + lastCloseTime              |
+//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Transaction Monitoring & Tracking (via KurosawaTrack.mqh)         |
+//| - Keep this wrapper identical across EAs                          |
+//| - Let the tracker update loss streak + lastCloseTime              |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction& trans,
+                        const MqlTradeRequest& req,
+                        const MqlTradeResult& res)
+{
+   
+   KurosawaTrack_OnTradeTransaction(
+      InpTrackEnable,               // 1
+      trans,                        // 2
+      InpEaId,                      // 3
+      InpEaName,                    // 4
+      InpEaVersion,                 // 5
+      (int)InpMagic,                // 6 
+      InpTrackSendOpen,             // 7
+      g_lastOpenDealId,             // 8
+      g_lastCloseDealId,            // 9
+      g_consecLosses,               // 10
+      g_lastCloseTime,              // 11
+      (ENUM_TIMEFRAMES)_Period,     // 12
+      _Symbol                       // 13
+   );
 }
