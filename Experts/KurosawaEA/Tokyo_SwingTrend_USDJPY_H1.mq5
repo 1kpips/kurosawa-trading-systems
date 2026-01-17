@@ -1,31 +1,25 @@
 //+------------------------------------------------------------------+
 //| File: Tokyo_SwingTrend_USDJPY_H1.mq5                             |
 //| EA  : Tokyo_SwingTrend_USDJPY_H1                                 |
-//| Ver : 0.1.3-track                                                |
+//| Ver : 0.1.4-track                                                |
 //|                                                                  |
-//| CHANGELOG (v0.1.3 / 2026-01-15):                                 |
-//| - Add equity-risk position sizing (replaces GetMinLot)           |
-//| - Make TP more realistic for pullback entries (default 1.6R)     |
-//| - Reduce trailing stop "hunt" risk (default start 1.5R, step 1.1)|
-//| - Optional RSI "cross-back" confirmation to improve timing       |
-//| - Add comments marking changes clearly                           |
+//| CHANGELOG (v0.1.4 / 2026-01-17):                                 |
+//| - Integrate Option A tracking timeframe hooks (pass _Period)     |
+//| - Call KurosawaTrack_OnNewBar() so MFE/MAE + barsHeld are logged |
+//| - Fix daily reset: DO NOT reset consecLosses daily (risk guard)  |
+//| - Add daily summary print (consistent with other EAs)            |
+//| - Safer HistorySelect window in tracking is handled in .mqh      |
+//| - Small robustness: validate lot/SL distance, normalize prices   |
 //|                                                                  |
-//| Tokyo Swing Trend (H1)                                           |
-//| - Trend filter: EMA(50) vs EMA(200)                              |
-//| - Entry: RSI pullback in trend direction                         |
-//| - Volatility filter: ATR must exceed minimum                     |
-//| - Optional quality filter: ADX >= threshold                      |
-//| - Risk: ATR-based SL, R-multiple TP                              |
+//| Strategy                                                         |
+//| - H1 only (enforced)                                             |
+//| - Trend: EMA(50) vs EMA(200)                                     |
+//| - Entry: RSI pullback (optional cross-back confirm)              |
+//| - Filters: ATR min, optional ADX                                 |
+//| - Risk: ATR SL + R-multiple TP                                   |
 //| - Optional trailing: ATR step after R threshold                  |
-//| - Session: Tokyo window in JST (fixed offset, no DST)            |
-//| - Tracking: OPEN/CLOSE via KurosawaTrack.mqh                     |
-//|                                                                  |
-//| Notes                                                            |
-//| - Signals use CLOSED BAR values (shift=1)                        |
-//| - Entry evaluated once per NEW BAR                               |
-//| - Market execution (price=0)                                     |
-//| - KurosawaHelpers.mqh provides time window, stops validation,    |
-//|   volume helpers, and position helpers                           |
+//| - Session: Tokyo window (JST)                                    |
+//| - Tracking: OPEN/CLOSE + local CSV excursions via KurosawaTrack  |
 //+------------------------------------------------------------------+
 #property strict
 
@@ -39,7 +33,7 @@ CTrade trade;
 input int    InpMagic              = 2026011008;
 input string InpEaId               = "ea-tokyo-swingtrend-usdjpy-h1";
 input string InpEaName             = "Tokyo_SwingTrend_USDJPY_H1";
-input string InpEaVersion          = "0.1.3"; // CHANGED: version bump
+input string InpEaVersion          = "0.1.4"; // CHANGED
 
 //==================== Session: Tokyo (JST) ====================//
 input int    InpJstStartHour       = 9;
@@ -47,78 +41,168 @@ input int    InpJstEndHour         = 23;
 input int    InpJstUtcOffset       = 9;
 
 //==================== Strategy: Trend & Pullback ====================//
-input int    InpEmaFast            = 50;
-input int    InpEmaSlow            = 200;
 
-input int    InpRsiPeriod          = 14;
-input double InpRsiBuyPullback     = 45.0; // buy pullback threshold (RSI <=)
-input double InpRsiSellPullback    = 55.0; // sell pullback threshold (RSI >=)
+// Trend regime (fast)
+// Smaller (20–34): trend reacts faster, more flips, more entries, more whipsaws.
+// Larger (70–100): trend reacts slower, fewer entries, later entries, smoother but can miss early trend legs.
+input int    InpEmaFast            = 50;     
 
-// CHANGED: Optional "cross-back" confirmation to reduce passive catching of falling knives
-input bool   InpUseRsiCrossConfirm = true;
-input double InpRsiBuyCrossLevel   = 45.0; // buy only when RSI crosses UP above this after dipping below
-input double InpRsiSellCrossLevel  = 55.0; // sell only when RSI crosses DOWN below this after rising above
+// Trend regime (slow baseline)
+// Smaller (100–150): trend filter loosens, more trades, more chop exposure.
+// Larger (250–300): stricter filter, fewer trades, tends to avoid chop but may miss medium reversals.
+input int    InpEmaSlow            = 200;    
+
+// Pullback sensitivity
+// Smaller (7–10): RSI swings more, more pullback triggers, more noise.
+// Larger (20–28): RSI smoother, fewer triggers, later pullbacks only.
+input int    InpRsiPeriod          = 14;   
+
+// When NOT using cross-confirm: BUY pullback threshold (RSI <=)
+// Higher (48–50): easier to qualify as pullback → more buy signals (but earlier / riskier).
+// Lower (35–42): deeper pullback required → fewer trades, often better price but can miss.
+input double InpRsiBuyPullback     = 45.0;   
+
+// When NOT using cross-confirm: SELL pullback threshold (RSI >=)
+// Lower (50–52): easier to qualify as pullback → more sell signals (but earlier / riskier).
+// Higher (58–65): deeper pullback required → fewer sells, often better timing but missed entries.
+input double InpRsiSellPullback    = 55.0;
+
+// Cross-back confirmation:
+// true  -> RSI must "return" across a level (reduces knife-catching, fewer but cleaner entries).
+// false -> passive threshold entry (more trades, more early entries, more drawdown in reversals).
+input bool   InpUseRsiCrossConfirm = true;   
+
+// With cross-confirm: BUY only when RSI crosses UP above this after being below
+// Higher (47–50): more confirmation → fewer trades, later entries, lower false positives.
+// Lower (40–44): weaker confirmation → more trades, earlier entries, more fake-outs.
+input double InpRsiBuyCrossLevel   = 45.0;  
+
+// With cross-confirm: SELL only when RSI crosses DOWN below this after being above
+// Lower (50–53): more confirmation (because must cross lower) → fewer sells, later entries.
+// Higher (56–60): easier to cross below → more sells, earlier entries, more fake-outs.
+input double InpRsiSellCrossLevel  = 55.0;   
 
 //==================== Market Quality Filters ====================//
-input int    InpAtrPeriod          = 14;
-input double InpAtrMinPips         = 8.0;   // ignore very low-volatility hours
 
-input bool   InpUseAdxFilter       = true;
-input int    InpAdxPeriod          = 14;
-input double InpMinAdxToTrade      = 18.0;  // require trend strength if enabled
+// Volatility measurement window
+// Smaller (7–10): ATR reacts faster → filter responds quickly to volatility changes.
+// Larger (20–28): ATR smoother → fewer sudden "on/off" switches.
+input int    InpAtrPeriod          = 14;     
+
+// Minimum volatility to trade (ATR in pips)
+// Higher (10–15): avoids dead hours, fewer trades, generally cleaner moves.
+// Lower (3–6): more trades in quiet markets, higher chop risk (esp. USDJPY).
+input double InpAtrMinPips         = 8.0;   
+
+// Trend-strength gate
+// true  -> fewer trades, avoids weak trends.
+// false -> more trades, but more range conditions sneak in.
+input bool   InpUseAdxFilter       = true;   
+
+// ADX measurement window
+// Smaller: more reactive but noisy; larger: smoother but late.
+input int    InpAdxPeriod          = 14;     
+
+// Required trend strength (if enabled)
+// Higher (22–28): fewer trades, higher trend quality, may miss early trend starts.
+// Lower (14–18): more trades, but more sideways market participation.
+input double InpMinAdxToTrade      = 18.0;
 
 //==================== Stops & Exit Management ====================//
-input double InpSlAtrMult          = 2.0;   // SL distance = ATR * this
 
-// CHANGED: More realistic target for pullback entries on H1 (was 2.5R)
-input double InpTpRMultiple        = 1.6;   // TP distance = SL distance * this
+// Stop distance = ATR * multiplier
+// Higher (2.5–3.5): wider SL, fewer stopouts, larger loss per trade, smaller lot (risk sizing), longer holds.
+// Lower (1.2–1.8): tighter SL, more stopouts, bigger lot (risk sizing), more sensitive to noise.
+input double InpSlAtrMult          = 2.0;    
 
-input bool   InpUseTrailing        = true;
+// Target distance = SL distance * R multiple
+// Higher (2.0–3.0): bigger winners but lower hit rate, more "almost TP then reverse" without management.
+// Lower (1.0–1.4): higher hit rate, smaller winners, tends to smooth equity.
+input double InpTpRMultiple        = 1.4;    
 
-// CHANGED: Reduce trailing stop hunting (was start 1.0R, step 0.7*ATR)
-input double InpTrailStartR        = 1.5;   // begin trailing once price moves >= 1.5R
-input double InpTrailStepAtrMult   = 1.1;   // trailing step = ATR * this
+// Enable trailing logic after price moves in favor
+// true  -> protects winners, may cut big trends early if too aggressive.
+// false -> cleaner distribution, relies on TP/time stop; can give back large open profit.
+input bool   InpUseTrailing        = true;   
 
-input int    InpMaxHoldHours       = 96;    // time stop
+// Start trailing once price moves >= 1.5R
+// Higher (1.8–2.5): gives trades room; more full TP hits; bigger drawdown on reversals.
+// Lower (0.8–1.2): protects earlier; more small wins; more "stop-out after partial move".
+input double InpTrailStartR        = 1.2;   
+
+// Trailing gap = ATR * step multiplier
+// Higher (1.3–2.0): looser trailing; stays in trends; gives back more before exit.
+// Lower (0.6–1.0): tighter trailing; exits earlier; reduces giveback but increases churn. 
+input double InpTrailStepAtrMult   = 1.1;    
+
+// Time stop
+// Smaller (24–72): exits sooner; reduces weekend/news exposure; may cut valid swings.
+// Larger (120–240): allows long trends; increases carry/overnight risks and reversal giveback.
+input int    InpMaxHoldHours       = 96;     
 
 //==================== Risk & Safety ====================//
-input double InpMaxSpreadPoints    = 20;
-input int    InpMaxTradesPerDay    = 4;
-input int    InpMaxConsecLosses    = 3;
 
-input bool   InpCloseBeforeWeekend = true;
-input int    InpFridayCloseHourJst = 22;
+// Spread gate (points)
+// Lower: avoids bad fills; fewer trades during spread spikes.
+// Higher: more fills; but worsens expectancy (esp. scalps/entries near threshold).
+input double InpMaxSpreadPoints    = 20;   
 
-// CHANGED: Risk-based position sizing (replaces GetMinLot)
-// Risk percent is per trade based on SL distance.
-input double InpRiskPercent        = 0.50; // 0.50% equity risk per trade (0.25-0.75 recommended)
+// Daily activity cap
+// Lower: prevents overtrading and clustering; may miss multi-signal days.
+// Higher: more opportunities; more correlated exposure in one session.
+input int    InpMaxTradesPerDay    = 4;      
+
+// Stop trading after N consecutive losses
+// Lower (2): more conservative; avoids tilt regimes but may stop right before regime improves.
+// Higher (4–6): trades through rough patches; bigger drawdown tails.
+input int    InpMaxConsecLosses    = 3;      
+
+// Flatten into weekend
+// true  -> avoids weekend gaps; may exit profitable trends early.
+// false -> can capture weekend continuation; risk of gap against SL/TP.
+input bool   InpCloseBeforeWeekend = true;   
+
+// JST hour to stop/close on Friday (if enabled)
+// Earlier: safer, less liquidity risk; may cut too soon.
+// Later: more time to hit TP; more spread / whipsaw risk into market close.
+input int    InpFridayCloseHourJst = 22;     
+
+// Equity risk per trade (%)
+// Higher (0.75–1.0): faster growth, much larger drawdowns.
+// Lower (0.10–0.30): smoother equity, slower growth.
+// With ATR SL, risk sizing will auto-adjust lot smaller when SL is wide.
+input double InpRiskPercent        = 0.30;   
 
 //==================== Tracking ====================//
-input bool   InpTrackEnable        = true;
-input bool   InpTrackSendOpen      = true;
 
-//==================== Indicator Handles & Runtime State ====================//
-int hEmaFast = INVALID_HANDLE;
-int hEmaSlow = INVALID_HANDLE;
-int hRsi     = INVALID_HANDLE;
-int hAtr     = INVALID_HANDLE;
-int hAdx     = INVALID_HANDLE;
+input bool   InpTrackEnable        = true;   // Master tracking switch
+input bool   InpTrackSendOpen      = true;   // Send OPEN events too (useful to reconstruct incomplete closes)
 
-datetime g_lastBarTime   = 0;
-datetime g_lastCloseTime = 0;
+//==================== Indicator Handles & State ====================//
 
-int g_tradesToday     = 0;
-int g_consecLosses    = 0;
-int g_lastJstYmd      = 0;
+int hEmaFast = INVALID_HANDLE;              // EMA fast handle
+int hEmaSlow = INVALID_HANDLE;              // EMA slow handle
+int hRsi     = INVALID_HANDLE;              // RSI handle
+int hAtr     = INVALID_HANDLE;              // ATR handle
+int hAdx     = INVALID_HANDLE;              // ADX handle
 
-// Duplicate guards for tracking callbacks
-ulong g_lastOpenDealId   = 0;
-ulong g_lastClosedDealId = 0;
+datetime g_lastBarTime   = 0;               // New-bar guard; ensures 1 evaluation per bar
+datetime g_lastCloseTime = 0;               // Used for cooldown / logging if you implement it
 
-// Diagnostics (optional)
-int g_diagBars      = 0;
-int g_diagSignal    = 0;
-int g_diagTradeSent = 0;
+int g_tradesToday     = 0;                  // Resets daily (JST) to enforce InpMaxTradesPerDay
+
+int g_consecLosses    = 0;                  // NOTE: if KurosawaTrack increments on CLOSE, do NOT reset daily.
+                                             // Resetting daily hides streak risk; leave it persistent to stop bad regimes.
+
+int g_lastJstYmd      = 0;                  // JST day marker for daily reset
+
+ulong g_lastOpenDealId   = 0;               // Duplicate guard (OPEN)
+ulong g_lastClosedDealId = 0;               // Duplicate guard (CLOSE)
+
+int g_diagBars      = 0;                    // Diagnostics for logs (bars evaluated)
+int g_diagSignal    = 0;                    // Diagnostics for logs (signals found)
+int g_diagTradeSent = 0;                    // Diagnostics for logs (orders placed)
+
 
 //+------------------------------------------------------------------+
 //| Utility: clamp                                                  |
@@ -131,10 +215,7 @@ double ClampDouble(const double v, const double lo, const double hi)
 }
 
 //+------------------------------------------------------------------+
-//| CHANGED: Risk-based lot sizing                                   |
-//| - Calculates volume so that SL distance risks InpRiskPercent      |
-//| - Uses SYMBOL_TRADE_TICK_VALUE / SYMBOL_TRADE_TICK_SIZE           |
-//| - Normalizes to volume step and respects min/max volume           |
+//| Risk-based lot sizing                                            |
 //+------------------------------------------------------------------+
 double CalcRiskLotBySLDistance(const string symbol, const double sl_distance_price, const double risk_percent)
 {
@@ -152,14 +233,11 @@ double CalcRiskLotBySLDistance(const string symbol, const double sl_distance_pri
    if(!SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE,  tick_size))  return 0.0;
    if(tick_value <= 0.0 || tick_size <= 0.0) return 0.0;
 
-   // How much money is lost per 1.0 lot if price moves by sl_distance_price
-   // money_per_1lot = (sl_distance / tick_size) * tick_value
    const double money_per_1lot = (sl_distance_price / tick_size) * tick_value;
    if(money_per_1lot <= 0.0) return 0.0;
 
    double vol = risk_money / money_per_1lot;
 
-   // Respect broker volume constraints
    double vmin = 0.0, vmax = 0.0, vstep = 0.0;
    if(!SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN,  vmin))  return 0.0;
    if(!SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX,  vmax))  return 0.0;
@@ -168,16 +246,11 @@ double CalcRiskLotBySLDistance(const string symbol, const double sl_distance_pri
 
    vol = ClampDouble(vol, vmin, vmax);
 
-   // Normalize to step (floor to avoid accidental over-risk due to rounding up)
+   // floor to step (avoid rounding up risk)
    vol = MathFloor(vol / vstep) * vstep;
-
-   // Safety: if flooring pushed below minimum, snap to minimum
    if(vol < vmin) vol = vmin;
 
-   // Normalize decimal digits for volume display (not critical but tidy)
-   vol = NormalizeDouble(vol, 2);
-
-   return vol;
+   return NormalizeDouble(vol, 2);
 }
 
 //+------------------------------------------------------------------+
@@ -227,9 +300,16 @@ bool IsWeekendWindow()
 {
    MqlDateTime dt;
    TimeToStruct(NowJst(InpJstUtcOffset), dt);
-
-   // Friday after configured JST hour, plus all day Saturday
    return ((dt.day_of_week == 5 && dt.hour >= InpFridayCloseHourJst) || (dt.day_of_week == 6));
+}
+
+//+------------------------------------------------------------------+
+//| Daily summary                                                    |
+//+------------------------------------------------------------------+
+void PrintDailySummary()
+{
+   PrintFormat("--- DAILY SUMMARY [%d] --- Bars:%d Signals:%d Trades:%d ConsecLoss:%d",
+               g_lastJstYmd, g_diagBars, g_diagSignal, g_diagTradeSent, g_consecLosses);
 }
 
 //+------------------------------------------------------------------+
@@ -249,12 +329,11 @@ void CheckHoldTimeExit()
       if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
 
       const datetime openT = (datetime)PositionGetInteger(POSITION_TIME);
-
       if((TimeCurrent() - openT) >= (InpMaxHoldHours * 3600))
       {
          trade.PositionClose(ticket);
          g_lastCloseTime = TimeCurrent();
-         return; // one position per EA
+         return;
       }
    }
 }
@@ -262,14 +341,12 @@ void CheckHoldTimeExit()
 //+------------------------------------------------------------------+
 //| Trailing management                                              |
 //+------------------------------------------------------------------+
-// Trailing uses current ATR and starts after price has moved >= InpTrailStartR * initial risk.
-// Step size = ATR * InpTrailStepAtrMult.
 void ManageTrailing()
 {
    if(!PositionSelectByMagic(_Symbol, (long)InpMagic)) return;
 
    double atr[1];
-   if(CopyBuffer(hAtr, 0, 0, 1, atr) != 1) return; // shift=0 ok for trailing
+   if(CopyBuffer(hAtr, 0, 0, 1, atr) != 1) return;
    const double atrNow = atr[0];
    if(atrNow <= 0.0) return;
 
@@ -313,19 +390,21 @@ void ManageTrailing()
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // 1) Daily reset (JST)
+   // 1) Daily rollover (JST)
    const int ymd = JstYmd(NowJst(InpJstUtcOffset));
    if(ymd != g_lastJstYmd)
    {
-      g_lastJstYmd      = ymd;
-      g_tradesToday     = 0;
-      g_consecLosses    = 0;
-      g_diagBars        = 0;
-      g_diagSignal      = 0;
-      g_diagTradeSent   = 0;
+      PrintDailySummary();
+
+      g_lastJstYmd    = ymd;
+      g_tradesToday   = 0;
+      g_diagBars      = 0;
+      g_diagSignal    = 0;
+      g_diagTradeSent = 0;
+      // NOTE: do NOT reset g_consecLosses here
    }
 
-   // 2) Pre-weekend flatten (optional)
+   // 2) Pre-weekend flatten
    if(InpCloseBeforeWeekend && IsWeekendWindow())
    {
       if(PositionExists(_Symbol, InpMagic))
@@ -336,7 +415,7 @@ void OnTick()
    // 3) Time stop exit
    CheckHoldTimeExit();
 
-   // 4) Trailing (optional)
+   // 4) Trailing
    if(InpUseTrailing)
       ManageTrailing();
 
@@ -347,8 +426,13 @@ void OnTick()
    // 6) New bar gate
    const datetime bar0 = iTime(_Symbol, _Period, 0);
    if(bar0 == g_lastBarTime) return;
+
    g_lastBarTime = bar0;
    g_diagBars++;
+
+   // 6.1) Tracking excursion update (Option A)
+   // Caller supplies timeframe: use _Period (H1) for swing system review numbers.
+   KurosawaTrack_OnNewBar(InpTrackEnable, InpMagic, _Symbol, (ENUM_TIMEFRAMES)_Period);
 
    // 7) Spread gate
    const double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -359,12 +443,11 @@ void OnTick()
       return;
 
    // 8) Risk gates
-   if(g_tradesToday >= InpMaxTradesPerDay) return;
-   if(g_consecLosses >= InpMaxConsecLosses) return;
-   if(PositionExists(_Symbol, InpMagic)) return;
+   if(g_tradesToday >= InpMaxTradesPerDay)     return;
+   if(g_consecLosses >= InpMaxConsecLosses)    return;
+   if(PositionExists(_Symbol, InpMagic))       return;
 
-   // 9) Read CLOSED BAR (shift=1) indicator values
-   // CHANGED: For RSI cross confirmation we also read shift=2 when enabled.
+   // 9) Read CLOSED BAR values (shift=1)
    double emaF1[1], emaS1[1], rsi1[1], atr1[1], adx1[1];
    if(CopyBuffer(hEmaFast, 0, 1, 1, emaF1) != 1) return;
    if(CopyBuffer(hEmaSlow, 0, 1, 1, emaS1) != 1) return;
@@ -394,21 +477,17 @@ void OnTick()
    const bool uptrend   = (emaFast_1 > emaSlow_1);
    const bool downtrend = (emaFast_1 < emaSlow_1);
 
-   // 12) Signal logic (pullback + optional confirmation)
-   bool buySig = false;
+   // 12) Signal logic
+   bool buySig  = false;
    bool sellSig = false;
 
    if(!InpUseRsiCrossConfirm)
    {
-      // Original passive thresholds
       buySig  = (uptrend   && rsi_1 <= InpRsiBuyPullback);
       sellSig = (downtrend && rsi_1 >= InpRsiSellPullback);
    }
    else
    {
-      // CHANGED: "Cross-back" confirmation
-      // Buy: RSI was below level on bar-2, then crossed above on bar-1 while in uptrend
-      // Sell: RSI was above level on bar-2, then crossed below on bar-1 while in downtrend
       buySig  = (uptrend   && rsi_2 <= InpRsiBuyCrossLevel  && rsi_1 > InpRsiBuyCrossLevel);
       sellSig = (downtrend && rsi_2 >= InpRsiSellCrossLevel && rsi_1 < InpRsiSellCrossLevel);
    }
@@ -418,16 +497,18 @@ void OnTick()
 
    // 13) Build ATR-based SL/TP
    const double slDist = atr_1 * InpSlAtrMult;
-   const string cmt    = InpEaName + "|" + InpEaVersion;
+   if(slDist <= 0.0) return;
 
-   // CHANGED: Risk-based lot sizing using SL distance
+   const string cmt = InpEaName + "|" + InpEaVersion;
+
    const double lot = CalcRiskLotBySLDistance(_Symbol, slDist, InpRiskPercent);
    if(lot <= 0.0) return;
 
+   // 14) Place order
    if(buySig)
    {
-      double sl = ask - slDist;
-      double tp = ask + (slDist * InpTpRMultiple);
+      double sl = NormalizeDouble(ask - slDist, _Digits);
+      double tp = NormalizeDouble(ask + (slDist * InpTpRMultiple), _Digits);
 
       if(EnsureStopsLevel(_Symbol, ask, sl, tp, true, true))
       {
@@ -438,10 +519,10 @@ void OnTick()
          }
       }
    }
-   else // sellSig
+   else
    {
-      double sl = bid + slDist;
-      double tp = bid - (slDist * InpTpRMultiple);
+      double sl = NormalizeDouble(bid + slDist, _Digits);
+      double tp = NormalizeDouble(bid - (slDist * InpTpRMultiple), _Digits);
 
       if(EnsureStopsLevel(_Symbol, bid, sl, tp, false, true))
       {
@@ -455,14 +536,13 @@ void OnTick()
 }
 
 //+------------------------------------------------------------------+
-//| Transaction Monitoring & Tracking (via KurosawaTrack.mqh)         |
-//| - Keep this wrapper in EA (MQL5 event entrypoint)                |
-//| - All tracking logic is inside KurosawaTrack.mqh                 |
+//| Tracking callback                                                 |
 //+------------------------------------------------------------------+
 void OnTradeTransaction(const MqlTradeTransaction& trans,
                         const MqlTradeRequest& req,
                         const MqlTradeResult& res)
 {
+   // NOTE: Option A. EA passes timeframe explicitly for reporting consistency.
    KurosawaTrack_OnTradeTransaction(
       InpTrackEnable,
       trans,
@@ -474,6 +554,7 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
       g_lastOpenDealId,
       g_lastClosedDealId,
       g_consecLosses,
-      g_lastCloseTime
+      g_lastCloseTime,
+      (ENUM_TIMEFRAMES)_Period,_Symbol
    );
 }
