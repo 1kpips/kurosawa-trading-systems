@@ -1,38 +1,79 @@
 # Kurosawa Trading Systems
 
-Systematic MetaTrader 5 (MT5) Expert Advisors and shared trading utilities designed for disciplined, session-based algorithmic trading.
+Systematic **MetaTrader 5 (MT5)** Expert Advisors and shared infrastructure for disciplined, session-aware algorithmic trading.
 
-The KurosawaEA suite prioritizes structural robustness, execution safety, and modular code over short-term curve fitting.
+The **KurosawaEA** suite is designed as a *portfolio of independent systems*, prioritizing **capital protection, execution safety, and long-term robustness** over short-term backtest optimization.
 
 ---
 
-## Philosophy
+## Design Philosophy
 
-The suite is built upon five core development pillars:
+All systems in this repository are built under the following core principles:
 
-- **Closed-Bar Logic First**: All entry and exit signals are derived from confirmed candle data to eliminate repainting and ensure live-to-backtest consistency.
-- **One EA, One Position**: Strategies enforce a strict one-position-per-EA rule managed via unique Magic Numbers to prevent internal signal conflict.
-- **Session-Aware Execution**: Bots respect Tokyo, London, and New York liquidity windows using JST-based time control with full support for midnight session crossing.
-- **Execution Safety Over Frequency**: Trades are gated by safeguards including dynamic spread filters, cooldown timers, and loss-streak breakers.
-- **Shared Infrastructure**: Critical mathematical and broker-compliance logic is centralized in a shared library to ensure consistency across the portfolio.
+### 1. Closed-Bar Logic Only
+All trading decisions are made using **confirmed (closed) candles**.  
+No indicators rely on live-bar values or repainting logic, ensuring **live behavior matches backtests**.
+
+### 2. One EA, One Position
+Each EA enforces:
+- a **unique Magic Number**
+- **maximum one open position per EA**
+
+This prevents signal interference and simplifies risk attribution at the portfolio level.
+
+### 3. Session-Aware Execution
+Every EA is explicitly bound to a **market session**:
+- Tokyo
+- London
+- New York
+
+Trades are only allowed during defined liquidity windows, with **safe handling of midnight-crossing sessions**.
+
+### 4. Execution Safety Over Frequency
+Trade frequency is intentionally constrained using:
+- spread filters
+- cooldown timers
+- daily loss limits
+- consecutive loss protection
+- volatility (ATR) safety windows
+
+Missing a trade is always preferred over entering a low-quality one.
+
+### 5. Shared, Centralized Infrastructure
+All critical logic is centralized into shared libraries to guarantee **behavioral consistency** across EAs:
+- broker constraint handling
+- pip / point math
+- session logic
+- tracking and telemetry
 
 ---
 
 ## Repository Structure
 
-The repository follows a clean, professional MQL5 directory layout:
-
 ```text
 /Experts/KurosawaEA/
- ├── London_ScalpHigh_EURUSD_M1.mq5    # High-frequency EMA crossover
- ├── London_SwingTrend_EURUSD_H1.mq5   # Hourly trend following (ATR-based)
- ├── Tokyo_ScalpHigh_USDJPY_M1.mq5     # Micro-scalping with cost guards
- ├── Tokyo_DaytradeScalp_USDJPY_M5.mq5 # Intraday momentum (M5)
- ├── Tokyo_RangeRevert_USDJPY_M5.mq5   # BB Mean Reversion (Mid-band exit)
- ├── NewYork_SwingTrend_GBPUSD_H1.mq5  # ATR-managed swing trend
- ├── NewYork_RangeRevert_USDCAD_M5.mq5 # Volatility-filtered reversion
- └── D1_Signal_SMA_Slope.mq5           # Institutional bias publisher
- └── KurosawaHelpers.mqh               # Shared utility framework
+ ├── D1_Signal_Breakout.mq5
+ ├── D1_Signal_SMA_Slope.mq5
+ ├── D1_Signal_Trend.mq5
+
+ ├── London_ScalpHigh_EURUSD_M1.mq5
+ ├── London_RangeRevert_EURGBP_M5.mq5
+ ├── London_SwingTrend_EURUSD_H1.mq5
+ ├── London_SwingTrend_EURJPY_H1.mq5
+ ├── London_SwingTrend_GBPJPY_H1.mq5
+
+ ├── Tokyo_ScalpHigh_USDJPY_M1.mq5
+ ├── Tokyo_DaytradeScalp_USDJPY_M5.mq5
+ ├── Tokyo_RangeRevert_USDJPY_M5.mq5
+ ├── Tokyo_SwingTrend_USDJPY_H1.mq5
+
+ ├── NewYork_RangeRevert_USDCAD_M5.mq5
+ ├── NewYork_TrendPullback_EURUSD_M5.mq5
+ ├── NewYork_SwingTrend_GBPUSD_H1.mq5
+ ├── NewYork_SwingTrend_AUDUSD_H1.mq5
+
+ ├── KurosawaHelpers.mqh
+ └── KurosawaTrack.mqh
 ```
 
 ## Shared Infrastructure (KurosawaHelpers.mqh)
@@ -46,47 +87,105 @@ The centralized helper library handles all execution-critical calculations:
 
 ---
 
+Each EA is self-contained, symbol- and timeframe-specific, and designed to be run independently as part of a diversified portfolio.
+
+## Shared Infrastructure
+
+### KurosawaHelpers.mqh
+
+Provides execution-critical utilities shared by all EAs.  
+No EA reimplements this logic locally.
+
+**Session Handling**
+- Broker-time session windows
+- Safe handling of midnight-crossing sessions
+
+**Price & Volume Normalization**
+- Automatic handling of JPY vs non-JPY pairs
+- Broker min / max / step volume compliance
+
+**Broker Safety**
+- StopsLevel and FreezeLevel validation
+- Order parameter normalization to prevent rejections
+
+**Volatility Filters**
+- ATR-based safety gates
+- ADX-based regime suppression
+
+---
+
+### KurosawaTrack.mqh
+
+Unified trade tracking and telemetry layer used across the entire portfolio.
+
+- Centralized `OnTradeTransaction` handling
+- OPEN / CLOSE event reporting
+- Loss-streak tracking
+- Duplicate-deal guards
+- Symbol- and timeframe-aware metadata
+
+All EAs call the **same 13-parameter tracking interface**, ensuring consistent and reliable reporting behavior.
+
+---
+
 ## Strategy Archetypes
 
-### Scalping (M1/M5)
-* **Focus**: High-liquidity windows such as the Tokyo or London Open.
-* **Cost Guard**: Includes "MinMove" filters requiring expected targets to exceed spread multiples.
-* **Cooldown**: Mandatory wait periods between trades to prevent overtrading.
+### Scalping (M1 / M5)
+- Designed for high-liquidity windows
+- Strong cost controls (spread and volatility filters)
+- Mandatory cooldown between trades
+- Intended for precision, not volume
 
 ### Swing Trend (H1)
-* **Trend Definition**: Multi-hour trend following using EMA (50/200) definitions.
-* **Volatility Stops**: ATR-based SL and R-multiple TP targets that adapt to market noise.
-* **Trailing**: Optional ATR-based trailing stops to lock in profits during extended moves.
+- EMA(50/200) structural trend definition
+- ATR-based stop sizing and R-multiple targets
+- Session-gated to avoid low-liquidity chop
+- Designed for multi-hour directional moves
 
 ### Range & Mean Reversion (M5)
-* **Focus**: Low-volatility compression phases using Bollinger Bands and RSI extremes.
-* **Mid-Band Exit**: Dynamically closes positions when price reverts to the mean (BB Mid).
-* **Trend Suppression**: Uses ADX filters to block entries during strong trending regimes.
+- Bollinger Band and RSI extreme-based entries
+- Mean (mid-band) based exits
+- ADX filters to suppress trades during strong trends
+- Focused on volatility compression regimes
+
+### Daily Bias Signals (D1)
+- Non-trading signal generators
+- Publish higher-timeframe market structure
+- Intended for directional context and filtering
 
 ---
 
-## Tracking & Telemetry
+## Risk & Safety Controls
 
-EAs feature built-in integration with external tracking APIs for performance logging:
+Every EA enforces the following controls:
 
-* **Events**: Automated reporting of OPEN and CLOSE events.
-* **Metadata**: Payloads include EA ID, Magic Number, Deal ID, and trade profit/loss.
-* **Currency Intelligence**: Automatically detects account currency for accurate reporting.
-* **Integrity**: Implements ID guards (g_lastClosedDealId) to prevent duplicate reporting.
+- Risk-based position sizing (or safe fixed-lot fallback)
+- Daily loss limits
+- Maximum consecutive loss protection
+- Spread filters
+- Cooldown timers
+- Maximum positions per Magic Number
+
+These controls are **mandatory**, not optional.
 
 ---
 
-## Usage & Safety
+## Usage Notes
 
-* **Timeframe Enforcement**: EAs validate chart timeframes on startup to prevent execution errors.
-* **Spread Protection**: Entry is blocked if market spreads exceed defined thresholds.
-* **Risk Stops**: Daily trade caps and consecutive loss limits act as automated circuit breakers.
-* **Deployment**: Always test on demo accounts first. Ensure your tracking URL is allowlisted in MT5 settings.
+- Always attach EAs to their intended symbol and timeframe
+- Verify broker server time and session inputs before deployment
+- Demo-test all EAs before live trading
+- If using tracking, ensure required WebRequest domains are allowlisted in MT5
 
 ---
 
 ## Disclaimer
 
-**Risk Warning**: The information and code provided here do not constitute investment advice. FX trading involves significant risk and may result in losses. Signals and performance data are provided for reference only. 
+### Risk Warning
+Trading foreign exchange on margin carries a high level of risk and may not be suitable for all investors. Losses can exceed initial deposits.
 
-**No Liability**: By using this code, you acknowledge that all trading decisions are your own responsibility. The authors and contributors of this repository are not responsible for any financial losses or gains incurred through the use of this software. Past performance does not guarantee future results.
+### No Investment Advice
+This repository is provided for educational and research purposes only. No guarantees of profitability are made or implied.
+
+### No Liability
+The authors and contributors assume no responsibility for any trading losses incurred through the use of this software. Past performance does not guarantee future results.
