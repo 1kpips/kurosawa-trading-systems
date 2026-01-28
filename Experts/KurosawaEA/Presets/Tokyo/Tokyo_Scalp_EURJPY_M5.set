@@ -1,0 +1,123 @@
+;==================================================
+; Tokyo_Scalp_EURJPY_M5.set
+;==================================================
+
+;-------------------------------
+; Identity / Meta
+;-------------------------------
+InpZone=Tokyo
+InpEaName=Tokyo_Scalp_EURJPY_M5
+InpMagic=2026012702
+InpEaId=ea-tokyo-scalp-eurjpy-m5
+InpEaVersion=0.3.0
+
+;-------------------------------
+; Target
+;-------------------------------
+InpTargetPair=EURJPY
+InpTargetTf=PERIOD_M5
+
+;-------------------------------
+; Tracking
+;-------------------------------
+InpTrackEnable=true
+InpTrackSendOpen=true
+
+;-------------------------------
+; Session (Tokyo, JST native)
+; 09:00 -> 15:00 JST
+;-------------------------------
+InpStartHour=9
+InpEndHour=15
+InpUtcOffset=9
+
+;-------------------------------
+; Bollinger Bands (core scalp)
+;-------------------------------
+InpBbPeriod=20
+InpBbDev=2.0
+
+;-------------------------------
+; RSI (mean reversion timing)
+; EURJPY moves more than USDJPY in Tokyo
+;-------------------------------
+InpRsiPeriod=14
+InpRsiBuyBelow=30.0
+InpRsiSellAbove=70.0
+
+;-------------------------------
+; ATR window gate (POINTS)
+; EURJPY typically wider ATR than USDJPY
+;-------------------------------
+InpAtrPeriod=14
+InpAtrMinPoints=10.0
+InpAtrMaxPoints=60.0
+
+;-------------------------------
+; ADX filter (range-only scalp)
+;-------------------------------
+InpUseAdxFilter=true
+InpAdxPeriod=14
+InpMinAdxToTrade=0.0
+InpMaxAdxToTrade=24.0
+
+;-------------------------------
+; Fixed SL / TP (POINTS)
+; Slightly wider than USDJPY
+;-------------------------------
+InpSlPoints=55.0
+InpTpPoints=85.0
+
+;-------------------------------
+; Risk sizing
+;-------------------------------
+InpUseRiskSizing=false
+InpRiskPercent=0.30
+InpFixedLot=0.05
+InpMaxLotCap=1.0
+
+;-------------------------------
+; Frequency & Safety Guards
+;-------------------------------
+InpMaxTradesPerDay=8
+InpMaxSpreadPoints=25
+InpMaxConsecLosses=3
+InpResetConsecLossDaily=true
+InpDailyLossLimitPercent=1.8
+InpCooldownMinutes=10
+InpMaxHoldMinutes=35
+
+;-------------------------------
+; Min-move sanity filter
+;-------------------------------
+InpUseMinMoveFilter=true
+InpMinMoveSpreadMult=2.0
+
+;-------------------------------
+; Placeholders (kept for schema)
+;-------------------------------
+InpEmaFast=0
+InpEmaSlow=0
+InpUseDirFilter=false
+InpEmaDir=0
+
+InpUseRsiCrossConfirm=false
+InpRsiBuyCrossLevel=0
+InpRsiSellCrossLevel=0
+
+InpUseWickSignal=false
+InpMinBandBreakPips=0.0
+InpMinEdgeOverSpread=0.0
+
+InpUseMidBandExit=false
+InpUseTrailing=false
+InpTrailStartR=0.0
+InpTrailStepAtrMult=0.0
+
+InpSlAtrMult=0.0
+InpTpRMultiple=0.0
+
+;-------------------------------
+; Strategy specifics
+;-------------------------------
+InpRequireReclaim=true

@@ -1,0 +1,114 @@
+;==================================================
+; London_SwingTrend_GBPJPY_H1.set
+;==================================================
+
+;-------------------------------
+; Identity / Meta
+;-------------------------------
+InpZone=London
+InpEaName=London_SwingTrend_GBPJPY_H1
+InpMagic=2026012608
+InpEaId=ea-london-swingtrend-gbpjpy-h1
+InpEaVersion=0.3.0
+
+;-------------------------------
+; Target
+;-------------------------------
+InpTargetPair=GBPJPY
+InpTargetTf=PERIOD_H1
+
+;-------------------------------
+; Tracking
+;-------------------------------
+InpTrackEnable=true
+InpTrackSendOpen=true
+
+;-------------------------------
+; Session (London)
+;-------------------------------
+InpStartHour=8
+InpEndHour=17
+InpUtcOffset=0
+
+;-------------------------------
+; Trend bias (HTF)
+; GBPJPY is more volatile → keep bias clean
+;-------------------------------
+InpBiasTF=PERIOD_H4
+InpBiasEmaFast=50
+InpBiasEmaSlow=200
+
+;-------------------------------
+; Entry EMA (pullback)
+;-------------------------------
+InpEntryEma=20
+
+;-------------------------------
+; RSI pullback
+; Wider bands for JPY volatility
+;-------------------------------
+InpRsiPeriod=14
+InpRsiBuyBelow=40.0
+InpRsiSellAbove=60.0
+InpUseRsiCrossConfirm=false
+InpRsiBuyCrossLevel=0
+InpRsiSellCrossLevel=0
+
+;-------------------------------
+; ADX trend strength filter
+; GBPJPY trends harder, allow higher ADX
+;-------------------------------
+InpUseAdxFilter=true
+InpAdxPeriod=14
+InpMinAdxToTrade=18.0
+InpMaxAdxToTrade=45.0
+
+;-------------------------------
+; ATR window gate (POINTS)
+; JPY pairs → larger point values
+;-------------------------------
+InpAtrPeriod=14
+InpAtrMinPoints=25.0
+InpAtrMaxPoints=0.0
+
+;-------------------------------
+; Fixed SL / TP (POINTS)
+; (unused if ATR model enabled)
+;-------------------------------
+InpSlPoints=180.0
+InpTpPoints=0.0
+
+;-------------------------------
+; ATR-based stop model
+; Slightly wider for GBPJPY
+;-------------------------------
+InpSlAtrMult=2.2
+InpTpRMultiple=1.8
+
+;-------------------------------
+; Risk sizing
+; Keep % lower due to volatility
+;-------------------------------
+InpUseRiskSizing=true
+InpRiskPercent=0.30
+InpFixedLot=0.03
+InpMaxLotCap=1.5
+
+;-------------------------------
+; Frequency & Safety Guards
+;-------------------------------
+InpMaxTradesPerDay=2
+InpMaxSpreadPoints=35
+InpMaxConsecLosses=3
+InpResetConsecLossDaily=false
+InpDailyLossLimitPercent=2.0
+InpCooldownMinutes=120
+InpMaxHoldMinutes=0
+
+;-------------------------------
+; Optional exits / trailing
+;-------------------------------
+InpUseMidBandExit=false
+InpUseTrailing=false
+InpTrailStartR=0.0
+InpTrailStepAtrMult=0.0

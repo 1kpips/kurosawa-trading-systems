@@ -1,0 +1,136 @@
+;==================================================
+; NewYork_Scalp_USDJPY_M5.set
+;==================================================
+
+;-------------------------------
+; Identity / Meta
+;-------------------------------
+InpZone=NewYork
+InpEaName=NewYork_Scalp_USDJPY_M5
+InpMagic=2026012611
+InpEaId=ea-ny-scalp-usdjpy-m5
+InpEaVersion=0.3.0
+
+;-------------------------------
+; Target
+;-------------------------------
+InpTargetPair=USDJPY
+InpTargetTf=PERIOD_M5
+
+;-------------------------------
+; Tracking
+;-------------------------------
+InpTrackEnable=true
+InpTrackSendOpen=true
+
+;-------------------------------
+; Session (New York in JST, fixed offset)
+; 22:00 -> 05:00 JST (midnight crossing)
+;-------------------------------
+InpStartHour=22
+InpEndHour=5
+InpUtcOffset=9
+
+;-------------------------------
+; EMA / Direction (placeholders)
+;-------------------------------
+InpEmaFast=9
+InpEmaSlow=21
+InpUseDirFilter=false
+InpEmaDir=200
+
+;-------------------------------
+; Min-move filter (optional)
+;-------------------------------
+InpUseMinMoveFilter=true
+InpMinMoveSpreadMult=2.0
+
+;-------------------------------
+; Bollinger Bands (REQUIRED)
+;-------------------------------
+InpBbPeriod=20
+InpBbDev=2.0
+
+;-------------------------------
+; RSI (REQUIRED)
+; USDJPY NY scalp: slightly tighter than default
+;-------------------------------
+InpRsiPeriod=14
+InpRsiBuyBelow=28.0
+InpRsiSellAbove=72.0
+
+;-------------------------------
+; RSI cross confirm (placeholder)
+;-------------------------------
+InpUseRsiCrossConfirm=false
+InpRsiBuyCrossLevel=0
+InpRsiSellCrossLevel=0
+
+;-------------------------------
+; Wick signal (placeholder)
+;-------------------------------
+InpUseWickSignal=false
+InpMinBandBreakPips=0.0
+InpMinEdgeOverSpread=0.0
+
+;-------------------------------
+; ADX filter (calm-only scalp)
+;-------------------------------
+InpUseAdxFilter=true
+InpAdxPeriod=14
+InpMinAdxToTrade=0.0
+InpMaxAdxToTrade=25.0
+
+;-------------------------------
+; ATR window gate (POINTS)
+; USDJPY M5: avoid dead market and extreme spikes
+;-------------------------------
+InpAtrPeriod=14
+InpAtrMinPoints=6.0
+InpAtrMaxPoints=40.0
+
+;-------------------------------
+; Fixed SL/TP (POINTS)
+; USDJPY NY M5: modest targets
+;-------------------------------
+InpSlPoints=55.0
+InpTpPoints=85.0
+
+;-------------------------------
+; Risk sizing
+; For first live runs, fixed lot is safer
+;-------------------------------
+InpUseRiskSizing=false
+InpRiskPercent=0.30
+InpFixedLot=0.05
+InpMaxLotCap=2.0
+
+;-------------------------------
+; Frequency & Safety Guards
+;-------------------------------
+InpMaxTradesPerDay=6
+InpMaxSpreadPoints=25
+InpMaxConsecLosses=3
+InpResetConsecLossDaily=true
+InpDailyLossLimitPercent=2.0
+InpCooldownMinutes=10
+InpMaxHoldMinutes=60
+
+;-------------------------------
+; Exit / Trailing (placeholder)
+;-------------------------------
+InpUseMidBandExit=false
+InpUseTrailing=false
+InpTrailStartR=0.0
+InpTrailStepAtrMult=0.0
+
+;-------------------------------
+; ATR-based stop model (placeholder)
+;-------------------------------
+InpSlAtrMult=0.0
+InpTpRMultiple=0.0
+
+;-------------------------------
+; Strategy mode
+;-------------------------------
+InpRequireReclaim=true
