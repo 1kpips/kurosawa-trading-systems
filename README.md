@@ -8,43 +8,58 @@ The **KurosawaEA** suite is designed as a *portfolio of independent systems*, pr
 
 ## Design Philosophy
 
-All systems in this repository are built under the following core principles:
+All systems in this repository follow these non-negotiable principles:
 
 ### 1. Closed-Bar Logic Only
-All trading decisions are made using **confirmed (closed) candles**.  
-No indicators rely on live-bar values or repainting logic, ensuring **live behavior matches backtests**.
+All trading decisions are made using **confirmed (closed) candles** only.  
+No live-bar logic, no repainting indicators.
+
+This guarantees that **live behavior matches backtest behavior**.
+
+---
 
 ### 2. One EA, One Position
 Each EA enforces:
 - a **unique Magic Number**
 - **maximum one open position per EA**
 
-This prevents signal interference and simplifies risk attribution at the portfolio level.
+This prevents signal interference and simplifies portfolio-level risk attribution.
+
+---
 
 ### 3. Session-Aware Execution
 Every EA is explicitly bound to a **market session**:
-- Tokyo
-- London
-- New York
+- Tokyo  
+- London  
+- New York  
 
-Trades are only allowed during defined liquidity windows, with **safe handling of midnight-crossing sessions**.
+Trades are allowed only during defined liquidity windows, with **safe handling of midnight-crossing sessions**.
+
+---
 
 ### 4. Execution Safety Over Frequency
 Trade frequency is intentionally constrained using:
-- spread filters
-- cooldown timers
-- daily loss limits
-- consecutive loss protection
-- volatility (ATR) safety windows
+- spread filters  
+- cooldown timers  
+- daily loss limits  
+- consecutive loss protection  
+- volatility (ATR) safety windows  
 
 Missing a trade is always preferred over entering a low-quality one.
 
-### 5. Shared, Centralized Infrastructure
-All critical logic is centralized into shared libraries to guarantee **behavioral consistency** across EAs:
-- broker constraint handling
-- pip / point math
-- session logic
-- tracking and telemetry
+---
+
+### 5. Preset-Driven Configuration (No Hard-Coded Inputs)
+**All actual trading parameters live in `.set` files**, not in code.
+
+- EAs and strategies contain **logic only**
+- Parameters are injected via **Preset `.set` files**
+- Inputs `.mqh` files exist only as placeholders for MT5 input binding
+
+This enables:
+- rapid strategy iteration
+- clean symbol / timeframe switching
+- zero code changes when tuning parameters
 
 ---
 
@@ -52,119 +67,162 @@ All critical logic is centralized into shared libraries to guarantee **behaviora
 
 ```text
 /Experts/KurosawaEA/
- ├── D1_Signal_Breakout.mq5
- ├── D1_Signal_SMA_Slope.mq5
- ├── D1_Signal_Trend.mq5
-
- ├── London_ScalpHigh_EURUSD_M1.mq5
- ├── London_RangeRevert_EURGBP_M5.mq5
- ├── London_SwingTrend_EURUSD_H1.mq5
- ├── London_SwingTrend_EURJPY_H1.mq5
- ├── London_SwingTrend_GBPJPY_H1.mq5
-
- ├── Tokyo_ScalpHigh_USDJPY_M1.mq5
- ├── Tokyo_DaytradeScalp_USDJPY_M5.mq5
- ├── Tokyo_RangeRevert_USDJPY_M5.mq5
- ├── Tokyo_SwingTrend_USDJPY_H1.mq5
-
- ├── NewYork_RangeRevert_USDCAD_M5.mq5
- ├── NewYork_TrendPullback_EURUSD_M5.mq5
- ├── NewYork_SwingTrend_GBPUSD_H1.mq5
- ├── NewYork_SwingTrend_AUDUSD_H1.mq5
-
- ├── KurosawaHelpers.mqh
- └── KurosawaTrack.mqh
+├── Engines/                  # Execution-only MQ5 engines
+│   ├── RangeRevertEA.mq5
+│   ├── ScalpEA.mq5
+│   ├── SwingTrendEA.mq5
+│   └── TrendPullbackEA.mq5
+│
+├── Strategies/               # Signal judgment only (NO execution)
+│   ├── RangeRevert.mqh
+│   ├── Scalp.mqh
+│   ├── SwingTrend.mqh
+│   └── TrendPullback.mqh
+│
+├── Helpers/                  # Shared infrastructure (umbrella)
+│   ├── KurosawaHelpers.mqh        # Umbrella include
+│   ├── KurosawaPositionUtils.mqh
+│   ├── KurosawaRiskManager.mqh
+│   ├── KurosawaSignalUtils.mqh
+│   ├── KurosawaTime.mqh
+│   └── KurosawaTradeUtils.mqh
+│
+├── Inputs/                   # Placeholder only (NOT used at runtime)
+│   ├── RangeRevert_Inputs.mqh
+│   ├── Scalp_Inputs.mqh
+│   ├── SwingTrend_Inputs.mqh
+│   └── TrendPullback_Inputs.mqh
+│
+├── Presets/                  # Actual trading parameters
+│   ├── Tokyo/
+│   │   ├── Tokyo_Scalp_USDJPY_M5.set
+│   │   ├── Tokyo_RangeRevert_USDJPY_M5.set
+│   │   └── Tokyo_SwingTrend_USDJPY_H1.set
+│   ├── London/
+│   │   ├── London_RangeRevert_EURGBP_M5.set
+│   │   ├── London_Scalp_EURUSD_M5.set
+│   │   └── London_SwingTrend_GBPJPY_H1.set
+│   └── NewYork/
+│       ├── NewYork_TrendPullback_NZDUSD_M15.set
+│       └── NewYork_SwingTrend_USDCAD_H1.set
+---
 ```
 
-## Shared Infrastructure (KurosawaHelpers.mqh)
+## Architecture Overview
 
-The centralized helper library handles all execution-critical calculations:
+### Execution Engines (`Engines/*.mq5`)
 
-* **Time Management**: JST/GMT conversions and session window validation.
-* **Pip Math**: Robust price normalization and automated 3-digit (JPY) or 5-digit broker detection.
-* **Broker Compliance**: Dynamic validation of StopsLevel and FreezeLevel to prevent order rejections.
-* **Regime Detection**: Standardized ADX-based filters for mean-reversion gating.
+Execution engines are responsible for **all MT5 lifecycle and execution logic**.
 
----
+They perform the following tasks:
 
-Each EA is self-contained, symbol- and timeframe-specific, and designed to be run independently as part of a diversified portfolio.
+- Handle MT5 lifecycle events  
+  (`OnInit`, `OnTick`, `OnTradeTransaction`)
+- Apply global safety gates  
+  (session window, spread filter, cooldown, daily limits)
+- Execute trades  
+  (SL / TP placement, position sizing, exit handling)
+- Call strategy modules for **closed-bar signal judgment only**
 
-## Shared Infrastructure
-
-### KurosawaHelpers.mqh
-
-Provides execution-critical utilities shared by all EAs.  
-No EA reimplements this logic locally.
-
-**Session Handling**
-- Broker-time session windows
-- Safe handling of midnight-crossing sessions
-
-**Price & Volume Normalization**
-- Automatic handling of JPY vs non-JPY pairs
-- Broker min / max / step volume compliance
-
-**Broker Safety**
-- StopsLevel and FreezeLevel validation
-- Order parameter normalization to prevent rejections
-
-**Volatility Filters**
-- ATR-based safety gates
-- ADX-based regime suppression
+Each engine is **strategy-agnostic** and contains **no market logic** beyond execution control.
 
 ---
 
-### KurosawaTrack.mqh
+### Strategy Modules (`Strategies/*.mqh`)
 
-Unified trade tracking and telemetry layer used across the entire portfolio.
+Strategy modules are responsible for **signal judgment only**.
 
-- Centralized `OnTradeTransaction` handling
-- OPEN / CLOSE event reporting
-- Loss-streak tracking
-- Duplicate-deal guards
-- Symbol- and timeframe-aware metadata
+Characteristics:
 
-All EAs call the **same 13-parameter tracking interface**, ensuring consistent and reliable reporting behavior.
+- Pure signal evaluation
+- Closed-bar logic only
+- No execution logic
+- No broker interaction
+- No position or risk management
+
+Strategies answer **one question only**:
+
+> Should we BUY, SELL, or do NOTHING on this closed bar?
 
 ---
 
-## Strategy Archetypes
+### Shared Infrastructure (`Helpers/*.mqh`)
 
-### Scalping (M1 / M5)
-- Designed for high-liquidity windows
-- Strong cost controls (spread and volatility filters)
-- Mandatory cooldown between trades
-- Intended for precision, not volume
+#### KurosawaHelpers.mqh (Umbrella)
 
-### Swing Trend (H1)
-- EMA(50/200) structural trend definition
-- ATR-based stop sizing and R-multiple targets
-- Session-gated to avoid low-liquidity chop
-- Designed for multi-hour directional moves
+`KurosawaHelpers.mqh` is the **single include point** for all shared utilities.
 
-### Range & Mean Reversion (M5)
-- Bollinger Band and RSI extreme-based entries
-- Mean (mid-band) based exits
-- ADX filters to suppress trades during strong trends
-- Focused on volatility compression regimes
+- No EA reimplements this logic locally
+- All execution-critical calculations are centralized
 
-### Daily Bias Signals (D1)
-- Non-trading signal generators
-- Publish higher-timeframe market structure
-- Intended for directional context and filtering
+**Provided functionality:**
+
+- Session & time management (JST / broker time)
+- Pip & price normalization (JPY / non-JPY)
+- Broker `StopsLevel` / `FreezeLevel` compliance
+- Volume normalization
+- ATR & ADX regime filters
+- Trade safety helpers
+
+All EAs behave consistently because **all critical math lives here**.
+
+---
+
+### Inputs Folder (Placeholder Only)
+
+```text
+/Inputs/*.mqh
+```
+
+- Exists only to satisfy MT5 input binding
+- Values are **not used**
+- All real parameters come from `.set` files
+
+This design allows you to:
+
+- Create your own `.set` files
+- Choose any symbol and timeframe
+- Reuse the same EA binary safely
+
+---
+
+### Presets (`Presets/{Session}/`)
+
+Preset naming convention:
+
+```text
+Presets/{MarketSession}/{MarketSession}_{Strategy}_{Pair}_{TF}.set
+```
+
+Example:
+
+```text
+Tokyo_SwingTrend_USDJPY_H1.set
+```
+
+Presets define:
+
+- Session window
+- Indicators
+- Risk model
+- Filters
+- SL / TP behavior
+- Tracking options
+
+**This is the only place you should tune parameters.**
 
 ---
 
 ## Risk & Safety Controls
 
-Every EA enforces the following controls:
+Every EA enforces:
 
 - Risk-based position sizing (or safe fixed-lot fallback)
 - Daily loss limits
 - Maximum consecutive loss protection
 - Spread filters
 - Cooldown timers
-- Maximum positions per Magic Number
+- Maximum one position per Magic Number
 
 These controls are **mandatory**, not optional.
 
@@ -173,19 +231,25 @@ These controls are **mandatory**, not optional.
 ## Usage Notes
 
 - Always attach EAs to their intended symbol and timeframe
-- Verify broker server time and session inputs before deployment
-- Demo-test all EAs before live trading
-- If using tracking, ensure required WebRequest domains are allowlisted in MT5
+- Load the corresponding `.set` file before enabling AutoTrading
+- Demo-test all configurations before live deployment
+- Never mix presets across sessions or symbols
 
 ---
 
 ## Disclaimer
 
 ### Risk Warning
-Trading foreign exchange on margin carries a high level of risk and may not be suitable for all investors. Losses can exceed initial deposits.
+
+Trading foreign exchange on margin carries a high level of risk and may not be suitable for all investors.  
+Losses can exceed initial deposits.
 
 ### No Investment Advice
-This repository is provided for educational and research purposes only. No guarantees of profitability are made or implied.
+
+This repository is provided for educational and research purposes only.  
+No guarantees of profitability are made or implied.
 
 ### No Liability
-The authors and contributors assume no responsibility for any trading losses incurred through the use of this software. Past performance does not guarantee future results.
+
+The authors and contributors assume no responsibility for any trading losses incurred through the use of this software.  
+Past performance does not guarantee future results.

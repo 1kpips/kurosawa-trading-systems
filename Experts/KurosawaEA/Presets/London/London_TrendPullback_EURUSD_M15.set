@@ -1,0 +1,105 @@
+;==================================================
+; London_TrendPullback_EURUSD_M15.set
+;==================================================
+
+;-------------------------------
+; Identity / Meta
+;-------------------------------
+InpZone=London
+InpEaName=London_TrendPullback_EURUSD_M15
+InpMagic=2026012610
+InpEaId=ea-london-trendpullback-eurusd-m15
+InpEaVersion=0.3.0
+
+;-------------------------------
+; Target
+;-------------------------------
+InpTargetPair=EURUSD
+InpTargetTf=PERIOD_M15
+
+;-------------------------------
+; Tracking
+;-------------------------------
+InpTrackEnable=true
+InpTrackSendOpen=true
+
+;-------------------------------
+; Session (London)
+; London core hours
+;-------------------------------
+InpStartHour=8
+InpEndHour=17
+InpUtcOffset=0
+
+;-------------------------------
+; Trend bias (higher TF)
+; M15 entry with H1 bias
+;-------------------------------
+InpBiasTF=PERIOD_H1
+InpBiasEmaFast=50
+InpBiasEmaSlow=200
+
+;-------------------------------
+; Entry EMA (pullback)
+;-------------------------------
+InpEntryEma=20
+
+;-------------------------------
+; RSI pullback
+; EURUSD mean pullback sweet spot
+;-------------------------------
+InpRsiPeriod=14
+InpRsiBuyBelow=45.0
+InpRsiSellAbove=55.0
+InpUseRsiCrossConfirm=false
+InpRsiBuyCrossLevel=0
+InpRsiSellCrossLevel=0
+
+;-------------------------------
+; ATR window gate (POINTS)
+; Keep EURUSD active but avoid dead chop
+;-------------------------------
+InpAtrPeriod=14
+InpAtrMinPoints=15.0
+InpAtrMaxPoints=0.0
+
+;-------------------------------
+; ATR-based stop / target model
+; Trend pullback favors asymmetric R
+;-------------------------------
+InpSlAtrMult=2.2
+InpTpRMultiple=1.6
+
+;-------------------------------
+; Fixed SL / TP (POINTS)
+; (unused, Excel-aligned)
+;-------------------------------
+InpSlPoints=0.0
+InpTpPoints=0.0
+
+;-------------------------------
+; Risk sizing
+;-------------------------------
+InpUseRiskSizing=true
+InpRiskPercent=0.35
+InpFixedLot=0.05
+InpMaxLotCap=2.0
+
+;-------------------------------
+; Frequency & Safety Guards
+;-------------------------------
+InpMaxTradesPerDay=2
+InpMaxSpreadPoints=18
+InpMaxConsecLosses=3
+InpResetConsecLossDaily=false
+InpDailyLossLimitPercent=2.0
+InpCooldownMinutes=60
+InpMaxHoldMinutes=0
+
+;-------------------------------
+; Optional exits / trailing
+;-------------------------------
+InpUseMidBandExit=false
+InpUseTrailing=false
+InpTrailStartR=0.0
+InpTrailStepAtrMult=0.0

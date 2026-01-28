@@ -1,0 +1,127 @@
+;==================================================
+; Tokyo_Scalp_USDJPY_M5.set
+;==================================================
+; NOTE:
+; - ALL distance inputs are in POINTS (not pips).
+; - For USDJPY (typical 3-digit pricing): 1 pip = 10 points.
+
+;-------------------------------
+; Identity / Meta
+;-------------------------------
+InpZone=Tokyo
+InpEaName=Tokyo_Scalp_USDJPY_M5
+InpMagic=2026012701
+InpEaId=ea-tokyo-scalp-usdjpy-m5
+InpEaVersion=0.3.22
+
+;-------------------------------
+; Target
+;-------------------------------
+InpTargetPair=USDJPY
+InpTargetTf=PERIOD_M5
+
+;-------------------------------
+; Tracking
+;-------------------------------
+InpTrackEnable=true
+InpTrackSendOpen=true
+
+;-------------------------------
+; Session (Tokyo, JST)
+; 09:00 -> 16:00 JST
+;-------------------------------
+InpStartHour=9
+InpEndHour=16
+InpUtcOffset=9
+
+;-------------------------------
+; Bollinger Bands
+;-------------------------------
+InpBbPeriod=20
+InpBbDev=2.0
+
+;-------------------------------
+; RSI
+;-------------------------------
+InpRsiPeriod=14
+InpRsiBuyBelow=32.0
+InpRsiSellAbove=70.0
+
+;-------------------------------
+; ATR window gate (POINTS)
+;-------------------------------
+InpAtrPeriod=14
+InpAtrMinPoints=10
+InpAtrMaxPoints=70
+
+;-------------------------------
+; ADX filter
+;-------------------------------
+InpUseAdxFilter=true
+InpAdxPeriod=14
+InpMinAdxToTrade=6.0
+InpMaxAdxToTrade=30
+
+;-------------------------------
+; Fixed SL / TP (POINTS)
+;-------------------------------
+InpSlPoints=55
+InpTpPoints=60
+
+;-------------------------------
+; Risk sizing
+;-------------------------------
+InpUseRiskSizing=false
+InpRiskPercent=0.30
+InpFixedLot=0.05
+InpMaxLotCap=1.0
+
+;-------------------------------
+; Frequency & Safety Guards
+;-------------------------------
+InpMaxTradesPerDay=8
+InpMaxSpreadPoints=9999 
+InpMaxConsecLosses=3
+InpResetConsecLossDaily=true
+InpDailyLossLimitPercent=1.8
+InpCooldownMinutes=10
+InpMaxHoldMinutes=30
+
+;-------------------------------
+; Min-move sanity filter
+; (requires TP distance > spread * mult)
+;-------------------------------
+InpUseMinMoveFilter=true
+InpMinMoveSpreadMult=2.0
+
+;-------------------------------
+; Wick / Edge quality filter
+;-------------------------------
+InpUseWickSignal=true
+InpMinBandBreakPoints=10
+InpMinEdgeOverSpread=1.2
+
+;-------------------------------
+; Placeholders (kept for schema)
+;-------------------------------
+InpEmaFast=0
+InpEmaSlow=0
+InpUseDirFilter=false
+InpEmaDir=0
+
+InpUseRsiCrossConfirm=false
+InpRsiBuyCrossLevel=0
+InpRsiSellCrossLevel=0
+
+InpUseMidBandExit=true
+InpUseTrailing=false
+InpTrailStartR=0.0
+InpTrailStepAtrMult=0.0
+
+InpSlAtrMult=0.0
+InpTpRMultiple=0.0
+
+;-------------------------------
+; Strategy specifics
+;-------------------------------
+InpRequireReclaim=true

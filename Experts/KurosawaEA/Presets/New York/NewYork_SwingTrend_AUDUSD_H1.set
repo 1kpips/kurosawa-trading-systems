@@ -1,0 +1,129 @@
+;==================================================
+; NewYork_SwingTrend_AUDUSD_H1.set
+;==================================================
+
+;-------------------------------
+; Identity / Meta
+;-------------------------------
+InpZone=NewYork
+InpEaName=NewYork_SwingTrend_AUDUSD_H1
+InpMagic=2026012632
+InpEaId=ea-ny-swingtrend-audusd-h1
+InpEaVersion=0.3.0
+
+;-------------------------------
+; Target
+;-------------------------------
+InpTargetPair=AUDUSD
+InpTargetTf=PERIOD_H1
+
+;-------------------------------
+; Tracking
+;-------------------------------
+InpTrackEnable=true
+InpTrackSendOpen=true
+
+;-------------------------------
+; Session (New York in JST)
+; 22:00 -> 05:00 JST
+;-------------------------------
+InpStartHour=22
+InpEndHour=5
+InpUtcOffset=9
+
+;-------------------------------
+; Trend bias (USED)
+; AUDUSD can trend well but is noisier than EURUSD → keep bias higher TF
+;-------------------------------
+InpBiasTF=PERIOD_H4
+InpBiasEmaFast=50
+InpBiasEmaSlow=200
+
+;-------------------------------
+; Entry specifics (USED)
+;-------------------------------
+InpEntryEma=20
+
+;-------------------------------
+; RSI pullback (USED)
+; AUDUSD often mean-reverts more → allow slightly deeper pullback
+;-------------------------------
+InpRsiPeriod=14
+InpRsiBuyBelow=44.0
+InpRsiSellAbove=56.0
+
+;-------------------------------
+; ATR window gate (POINTS)
+; AUDUSD H1 typical range is moderate
+;-------------------------------
+InpAtrPeriod=14
+InpAtrMinPoints=90.0
+InpAtrMaxPoints=520.0
+
+;-------------------------------
+; Fixed SL/TP (POINTS) placeholders
+;-------------------------------
+InpSlPoints=0.0
+InpTpPoints=0.0
+
+;-------------------------------
+; ATR-based stop model (USED)
+; slightly tighter TP than USDCAD because AUDUSD snaps back more often
+;-------------------------------
+InpSlAtrMult=2.1
+InpTpRMultiple=1.5
+
+;-------------------------------
+; Risk sizing
+;-------------------------------
+InpUseRiskSizing=true
+InpRiskPercent=0.40
+InpFixedLot=0.05
+InpMaxLotCap=1.5
+
+;-------------------------------
+; Frequency & Safety Guards
+;-------------------------------
+InpMaxTradesPerDay=1
+InpMaxSpreadPoints=28
+InpMaxConsecLosses=2
+InpResetConsecLossDaily=true
+InpDailyLossLimitPercent=2.0
+InpCooldownMinutes=120
+InpMaxHoldMinutes=1440
+
+;-------------------------------
+; ADX filter (trend regime)
+;-------------------------------
+InpUseAdxFilter=true
+InpAdxPeriod=14
+InpMinAdxToTrade=17.0
+InpMaxAdxToTrade=0.0
+
+;-------------------------------
+; Min-move / BB placeholders
+;-------------------------------
+InpUseMinMoveFilter=false
+InpBbPeriod=0
+InpBbDev=0.0
+InpMinMoveSpreadMult=0.0
+
+;-------------------------------
+; Wick / other placeholders
+;-------------------------------
+InpUseWickSignal=false
+InpMinBandBreakPips=0.0
+InpMinEdgeOverSpread=0.0
+
+;-------------------------------
+; Exit / trailing (disabled)
+;-------------------------------
+InpUseMidBandExit=false
+InpUseTrailing=false
+InpTrailStartR=0.0
+InpTrailStepAtrMult=0.0
+
+;-------------------------------
+; Strategy specifics
+;-------------------------------
+InpRequireReclaim=true
