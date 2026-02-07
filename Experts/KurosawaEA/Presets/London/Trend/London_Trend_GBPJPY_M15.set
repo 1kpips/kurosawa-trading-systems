@@ -1,0 +1,115 @@
+;==================================================
+; London_Trend_GBPJPY_M15.set
+; Engine : TrendEA
+; TF     : M15
+; Pair   : GBPJPY
+; Session: London (JST 16-22)
+;==================================================
+
+;-------------------------------
+; Identity / Meta
+;-------------------------------
+InpZone=London
+InpEaName=London_Trend_GBPJPY_M15
+InpMagic=2026020605
+InpEaId=ea-london-trend-gbpjpy-m15
+InpEaVersion=0.6.0
+
+;-------------------------------
+; Target
+;-------------------------------
+InpTargetPair=GBPJPY
+InpTargetTf=PERIOD_M15
+
+;-------------------------------
+; Tracking
+;-------------------------------
+InpTrackEnable=true
+InpTrackSendOpen=true
+
+;-------------------------------
+; Session (London in JST)
+;-------------------------------
+InpStartHour=16
+InpEndHour=22
+InpUtcOffset=9
+
+;-------------------------------
+; EMA / Direction Bias
+;-------------------------------
+InpEmaFast=20
+InpEmaSlow=100
+InpUseDirFilter=true
+InpEmaDir=0
+InpRequireEmaSlope=true
+
+;-------------------------------
+; RSI (pullback context only)
+;-------------------------------
+InpUseRsiCrossConfirm=false
+InpRsiPeriod=14
+InpRsiBuyBelow=46.0
+InpRsiSellAbove=54.0
+InpRsiBuyCrossLevel=0.0
+InpRsiSellCrossLevel=0.0
+
+;-------------------------------
+; Volatility Window (POINTS)
+; GBPJPY: 10 points = 1 pip (3-digit)
+;-------------------------------
+InpAtrPeriod=14
+InpAtrMinPoints=90
+InpAtrMaxPoints=0.0
+
+;-------------------------------
+; ADX Filter
+;-------------------------------
+InpUseAdxFilter=true
+InpAdxPeriod=14
+InpMinAdxToTrade=16
+InpMaxAdxToTrade=45
+
+;-------------------------------
+; Stops & Targets
+;-------------------------------
+InpUseRiskSizing=true
+InpRiskPercent=0.30
+InpFixedLot=0.01
+InpMaxLotCap=0.0
+
+InpSlAtrMult=2.0
+InpTpRMultiple=1.7
+
+;-------------------------------
+; Trade Limits / Safety
+;-------------------------------
+InpMaxTradesPerDay=2
+InpMaxSpreadPoints=28
+InpCooldownMinutes=50
+InpMaxHoldMinutes=240
+
+InpMaxConsecLosses=2
+InpResetConsecLossDaily=true
+InpDailyLossLimitPercent=1.0
+
+;-------------------------------
+; Execution
+;-------------------------------
+InpDeviationPoints=20
+
+;-------------------------------
+; Optional / Disabled
+;-------------------------------
+InpUseMinMoveFilter=false
+InpBbPeriod=0
+InpMinMoveSpreadMult=0.0
+InpBbDev=0.0
+
+InpUseWickSignal=false
+InpMinBandBreakPips=0.0
+InpMinEdgeOverSpread=0.0
+
+InpUseMidBandExit=false
+InpUseTrailing=false
+InpTrailStartR=0.0
+InpTrailStepAtrMult=0.0

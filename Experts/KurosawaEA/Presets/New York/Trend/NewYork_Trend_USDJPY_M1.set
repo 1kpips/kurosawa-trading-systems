@@ -1,0 +1,106 @@
+;==================================================
+; NewYork_Trend_USDJPY_M1.set
+; Engine : TrendEA
+; TF     : M1
+; Pair   : USDJPY
+; Session: New York 
+;==================================================
+
+;-------------------------------
+; Identity / Meta
+;-------------------------------
+InpZone=NewYork
+InpEaName=NewYork_Trend_USDJPY_M1
+InpMagic=2026020611
+InpEaId=ea-ny-trend-usdjpy-m1
+InpEaVersion=0.7.0
+
+;-------------------------------
+; Target
+;-------------------------------
+InpTargetPair=USDJPY
+InpTargetTf=PERIOD_M1
+
+;-------------------------------
+; Tracking
+;-------------------------------
+InpTrackEnable=true
+InpTrackSendOpen=true
+
+;-------------------------------
+; Session (NY safer window)
+;-------------------------------
+InpStartHour=23
+InpEndHour=2
+InpUtcOffset=9
+
+;-------------------------------
+; EMA / Direction Bias
+;-------------------------------
+InpEmaFast=20
+InpEmaSlow=100
+InpUseDirFilter=true
+InpEmaDir=0
+InpRequireEmaSlope=true
+
+;-------------------------------
+; RSI (context only)
+;-------------------------------
+InpUseRsiCrossConfirm=false
+InpRsiPeriod=14
+InpRsiBuyBelow=48.0
+InpRsiSellAbove=52.0
+InpRsiBuyCrossLevel=0.0
+InpRsiSellCrossLevel=0.0
+
+;-------------------------------
+; Volatility Filter (POINTS)
+; M1 needs strict noise cut
+;-------------------------------
+InpAtrPeriod=14
+InpAtrMinPoints=25
+InpAtrMaxPoints=0.0
+
+;-------------------------------
+; ADX Filter (fast momentum only)
+;-------------------------------
+InpUseAdxFilter=true
+InpAdxPeriod=14
+InpMinAdxToTrade=20
+InpMaxAdxToTrade=35
+
+;-------------------------------
+; Stops & Targets
+;-------------------------------
+InpUseRiskSizing=true
+InpRiskPercent=0.20
+InpFixedLot=0.01
+InpMaxLotCap=0.0
+
+InpSlAtrMult=2.0
+InpTpRMultiple=2.4
+
+;-------------------------------
+; Trade Limits / Safety
+;-------------------------------
+InpMaxTradesPerDay=3
+InpMaxSpreadPoints=20
+InpCooldownMinutes=35
+InpMaxHoldMinutes=15
+
+InpMaxConsecLosses=2
+InpResetConsecLossDaily=true
+InpDailyLossLimitPercent=0.8
+
+;-------------------------------
+; Execution
+;-------------------------------
+InpDeviationPoints=15
+
+;-------------------------------
+; Optional / Disabled
+;-------------------------------
+InpUseMinMoveFilter=false
+InpUseWickSignal=false
+InpUseMidBandExit=false
+InpUseTrailing=false

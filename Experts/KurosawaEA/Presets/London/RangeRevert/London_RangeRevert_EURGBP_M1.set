@@ -1,0 +1,136 @@
+;==================================================
+; London_RangeRevert_EURGBP_M1_loose.set
+; Engine : RangeRevertEA
+; TF : M1
+; Pair : EURGBP
+; Session: London (JST)
+;==================================================
+
+;-------------------------------
+; Identity / Meta
+;-------------------------------
+InpZone=London
+InpEaName=London_RangeRevert_EURGBP_M1_loose
+InpMagic=2026020303
+InpEaId=ea-london-rangerevert-eurgbp-m1-loose
+InpEaVersion=0.4.3
+
+;-------------------------------
+; Target
+;-------------------------------
+InpTargetPair=EURGBP
+InpTargetTf=PERIOD_M1
+
+;-------------------------------
+; Tracking
+;-------------------------------
+InpTrackEnable=true
+InpTrackSendOpen=true
+
+;-------------------------------
+; Session (London in JST, fixed UTC offset)
+;-------------------------------
+InpStartHour=16
+InpEndHour=22
+InpUtcOffset=9
+
+;-------------------------------
+; Execution
+;-------------------------------
+InpDeviationPoints=20
+
+;-------------------------------
+; Bollinger Bands
+;-------------------------------
+InpUseMinMoveFilter=false
+InpBbPeriod=20
+InpMinMoveSpreadMult=0.0
+InpBbDev=1.7
+
+;-------------------------------
+; RSI
+;-------------------------------
+InpUseRsiCrossConfirm=false
+InpRsiBuyCrossLevel=0.0
+InpRsiSellCrossLevel=0.0
+InpRsiPeriod=14
+InpRsiBuyBelow=30.0
+InpRsiSellAbove=80.0
+
+;-------------------------------
+; Entry quality
+; - EURGBP is often “shallow touch”, so keep wick+edge on
+; - MinBandBreakPoints slightly lower than EURUSD to allow entries
+;-------------------------------
+InpRequireReclaim=false
+InpUseWickSignal=true
+InpMinBandBreakPoints=12.0
+InpMinEdgeOverSpread=1.6
+
+; legacy fallback (keep 0 if you use Points)
+InpMinBandBreakPips=0.0
+
+;-------------------------------
+; ADX gate
+; - Keep MAX disabled (0) like your working scalp preset
+;-------------------------------
+InpUseAdxFilter=true
+InpAdxPeriod=14
+InpMinAdxToTrade=0.0
+InpMaxAdxToTrade=0.0
+
+;-------------------------------
+; ATR window (POINTS)
+; - EURGBP M1 tends to have smaller ATR than EURUSD
+;-------------------------------
+InpAtrPeriod=14
+InpAtrMinPoints=10.0
+InpAtrMaxPoints=140.0
+
+;-------------------------------
+; Risk sizing
+;-------------------------------
+InpUseRiskSizing=true
+InpRiskPercent=0.20
+InpFixedLot=0.01
+InpMaxLotCap=1.0
+
+;-------------------------------
+; Safety
+; - Keep spread check permissive only if your broker spread is stable
+; If EURGBP spread is wide, lower this later
+;-------------------------------
+InpMaxTradesPerDay=20
+InpMaxSpreadPoints=9999
+InpMaxConsecLosses=3
+InpResetConsecLossDaily=true
+InpDailyLossLimitPercent=1.8
+InpCooldownMinutes=10
+InpMaxHoldMinutes=30
+
+;-------------------------------
+; Exit
+;-------------------------------
+InpUseMidBandExit=true
+
+;-------------------------------
+; Trailing
+;-------------------------------
+InpUseTrailing=false
+InpTrailStartR=0.0
+InpTrailStepAtrMult=0.0
+
+;-------------------------------
+; ATR stop model
+; - Keep similar to your EURUSD loose run
+;-------------------------------
+InpSlAtrMult=3.0
+InpTpRMultiple=2.8
+
+;-------------------------------
+; EMA placeholders (unused)
+;-------------------------------
+InpEmaFast=0
+InpEmaSlow=0
+InpUseDirFilter=false
+InpEmaDir=0

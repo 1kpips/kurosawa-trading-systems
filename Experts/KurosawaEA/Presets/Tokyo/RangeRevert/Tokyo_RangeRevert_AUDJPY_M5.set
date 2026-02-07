@@ -1,0 +1,124 @@
+;==================================================
+; Tokyo_RangeRevert_AUDJPY_M5.set
+; Engine : RangeRevertEA
+; TF : M5
+; Pair : AUDJPY
+; Session: Tokyo (JST)
+;==================================================
+
+;-------------------------------
+; Identity / Meta
+;-------------------------------
+InpZone=Tokyo
+InpEaName=Tokyo_RangeRevert_AUDJPY_M5
+InpMagic=2026020401
+InpEaId=ea-tokyo-rangerevert-audjpy-m5
+InpEaVersion=0.4.4
+
+;-------------------------------
+; Target (intent check)
+;-------------------------------
+InpTargetPair=AUDJPY
+InpTargetTf=PERIOD_M5
+
+;-------------------------------
+; Tracking
+;-------------------------------
+InpTrackEnable=true
+InpTrackSendOpen=true
+
+;-------------------------------
+; Session (Tokyo, JST)
+;-------------------------------
+InpStartHour=9
+InpEndHour=16
+InpUtcOffset=9
+
+;-------------------------------
+; Execution
+;-------------------------------
+InpDeviationPoints=20
+
+;-------------------------------
+; Bollinger Bands
+; Tokyo prefers slightly smoother bands on M5
+;-------------------------------
+InpBbPeriod=26
+InpBbDev=2.1
+
+;-------------------------------
+; RSI confirmation
+; Keep it strict for Tokyo range quality
+;-------------------------------
+InpRsiPeriod=14
+InpRsiBuyBelow=30.0
+InpRsiSellAbove=80.0
+
+;-------------------------------
+; Entry quality
+; - Reclaim reduces noise on M5
+; - Wick signal requires meaningful penetration
+; - Band break depth is in POINTS
+;-------------------------------
+InpRequireReclaim=false
+InpUseWickSignal=true
+InpMinBandBreakPoints=10.0
+InpMinEdgeOverSpread=1.4
+
+;-------------------------------
+; Regime filter (ADX)
+; Tokyo can be over-filtered if MAX is too low
+; If trades drop too much, set InpMaxAdxToTrade=0.0 (disable upper bound)
+;-------------------------------
+InpUseAdxFilter=false
+InpAdxPeriod=14
+InpMinAdxToTrade=0.0
+InpMaxAdxToTrade=0.0
+
+;-------------------------------
+; ATR window (POINTS)
+; JPY crosses typically need a wider range than EURUSD
+;-------------------------------
+InpAtrPeriod=14
+InpAtrMinPoints=35.0
+InpAtrMaxPoints=260.0
+
+;-------------------------------
+; ATR-based stop model
+; SL = ATR(points) * mult
+; TP = SL * R
+;-------------------------------
+InpSlAtrMult=2.6
+InpTpRMultiple=4.6
+
+;-------------------------------
+; Risk sizing
+;-------------------------------
+InpUseRiskSizing=true
+InpRiskPercent=0.20
+InpFixedLot=0.01
+InpMaxLotCap=1.0
+
+;-------------------------------
+; Safety / frequency guards
+;-------------------------------
+InpMaxTradesPerDay=6
+InpMaxSpreadPoints=25
+InpMaxConsecLosses=3
+InpResetConsecLossDaily=true
+InpDailyLossLimitPercent=2.0
+InpCooldownMinutes=15
+InpMaxHoldMinutes=120
+
+;-------------------------------
+; Exit logic
+;-------------------------------
+InpUseMidBandExit=false
+
+;-------------------------------
+; EMA placeholders (unused in RangeRevert)
+;-------------------------------
+InpEmaFast=0
+InpEmaSlow=0
+InpUseDirFilter=false
+InpEmaDir=0

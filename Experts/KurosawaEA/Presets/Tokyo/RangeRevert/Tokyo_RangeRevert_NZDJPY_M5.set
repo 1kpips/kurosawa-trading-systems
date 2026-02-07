@@ -1,20 +1,24 @@
 ;==================================================
-; Tokyo_Scalp_EURJPY_M5.set
+; Tokyo_RangeRevert_NZDJPY_M5.set
+; Engine : RangeRevertEA
+; TF     : M5
+; Pair   : NZDJPY
+; Session: Tokyo (JST)
 ;==================================================
 
 ;-------------------------------
 ; Identity / Meta
 ;-------------------------------
 InpZone=Tokyo
-InpEaName=Tokyo_Scalp_EURJPY_M5
-InpMagic=2026012702
-InpEaId=ea-tokyo-scalp-eurjpy-m5
-InpEaVersion=0.3.0
+InpEaName=Tokyo_RangeRevert_NZDJPY_M5
+InpMagic=2026020403
+InpEaId=ea-tokyo-rangerevert-nzdjpy-m5
+InpEaVersion=0.4.6
 
 ;-------------------------------
 ; Target
 ;-------------------------------
-InpTargetPair=EURJPY
+InpTargetPair=NZDJPY
 InpTargetTf=PERIOD_M5
 
 ;-------------------------------
@@ -24,100 +28,85 @@ InpTrackEnable=true
 InpTrackSendOpen=true
 
 ;-------------------------------
-; Session (Tokyo, JST native)
-; 09:00 -> 15:00 JST
+; Session (Tokyo, JST)
 ;-------------------------------
 InpStartHour=9
 InpEndHour=15
 InpUtcOffset=9
 
 ;-------------------------------
-; Bollinger Bands (core scalp)
+; Execution
 ;-------------------------------
-InpBbPeriod=20
-InpBbDev=2.0
+InpDeviationPoints=20
 
 ;-------------------------------
-; RSI (mean reversion timing)
-; EURJPY moves more than USDJPY in Tokyo
+; Bollinger Bands
+;-------------------------------
+InpBbPeriod=25
+InpBbDev=1.6
+
+;-------------------------------
+; RSI (Tokyo range tuned)
 ;-------------------------------
 InpRsiPeriod=14
-InpRsiBuyBelow=30.0
+InpRsiBuyBelow=40.0
 InpRsiSellAbove=70.0
 
 ;-------------------------------
-; ATR window gate (POINTS)
-; EURJPY typically wider ATR than USDJPY
+; Entry quality
 ;-------------------------------
-InpAtrPeriod=14
-InpAtrMinPoints=10.0
-InpAtrMaxPoints=60.0
+InpRequireReclaim=false
+InpMinBandBreakPoints=14.0
+InpMinEdgeOverSpread=1.4
 
 ;-------------------------------
-; ADX filter (range-only scalp)
+; ADX filter (range only)
 ;-------------------------------
 InpUseAdxFilter=true
 InpAdxPeriod=14
-InpMinAdxToTrade=0.0
-InpMaxAdxToTrade=24.0
+InpMaxAdxToTrade=24.0   
 
 ;-------------------------------
-; Fixed SL / TP (POINTS)
-; Slightly wider than USDJPY
+; ATR window (POINTS)
 ;-------------------------------
-InpSlPoints=55.0
-InpTpPoints=85.0
+InpAtrPeriod=14
+InpAtrMinPoints=0.0
+InpAtrMaxPoints=0.0
 
 ;-------------------------------
 ; Risk sizing
 ;-------------------------------
-InpUseRiskSizing=false
-InpRiskPercent=0.30
-InpFixedLot=0.05
+InpUseRiskSizing=true
+InpRiskPercent=0.20
+InpFixedLot=0.01
 InpMaxLotCap=1.0
 
 ;-------------------------------
-; Frequency & Safety Guards
+; Safety / Frequency
 ;-------------------------------
-InpMaxTradesPerDay=8
+InpMaxTradesPerDay=12
 InpMaxSpreadPoints=25
 InpMaxConsecLosses=3
 InpResetConsecLossDaily=true
 InpDailyLossLimitPercent=1.8
-InpCooldownMinutes=10
-InpMaxHoldMinutes=35
+InpCooldownMinutes=15
+InpMaxHoldMinutes=90
 
 ;-------------------------------
-; Min-move sanity filter
+; Exit logic
 ;-------------------------------
-InpUseMinMoveFilter=true
-InpMinMoveSpreadMult=2.0
+InpUseMidBandExit=false
 
 ;-------------------------------
-; Placeholders (kept for schema)
+; ATR-based stop model
+;-------------------------------
+InpSlAtrMult=1.2
+InpTpRMultiple=1.6
+
+;-------------------------------
+; EMA placeholders (unused)
 ;-------------------------------
 InpEmaFast=0
 InpEmaSlow=0
 InpUseDirFilter=false
 InpEmaDir=0
-
-InpUseRsiCrossConfirm=false
-InpRsiBuyCrossLevel=0
-InpRsiSellCrossLevel=0
-
-InpUseWickSignal=false
-InpMinBandBreakPips=0.0
-InpMinEdgeOverSpread=0.0
-
-InpUseMidBandExit=false
-InpUseTrailing=false
-InpTrailStartR=0.0
-InpTrailStepAtrMult=0.0
-
-InpSlAtrMult=0.0
-InpTpRMultiple=0.0
-
-;-------------------------------
-; Strategy specifics
-;-------------------------------
-InpRequireReclaim=true

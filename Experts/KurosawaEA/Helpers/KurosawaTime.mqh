@@ -1,39 +1,31 @@
 //+--------------------------------------------------------------------+
-//| File: KurosawaTime.mqh                                             |
+//| File: Helpers/KurosawaTime.mqh                                     |
 //| Type: Include Library                                              |
-//| Ver : 0.1.0                                                        |
+//| Ver : 0.2.0                                                        |
 //|                                                                    |
 //| Description                                                        |
-//| Time utilities for the Kurosawa EA suite.                          |
+//| Time and session utilities for the Kurosawa EA suite.              |
 //|                                                                    |
-//| Scope                                                              |
-//| - UTC offset clock helpers                                         |
-//| - DST-aware clock for London and New York (project specific)       |
-//| - Session time window checks (supports midnight crossing)          |
-//| - Simple date/time helpers (YYYYMMDD, minutes-of-day)              |
+//| Design                                                             |
+//| - Self-contained: no dependency on other Kurosawa helper files     |
+//| - Uses UTC (TimeGMT) as the base clock for deterministic behavior  |
+//| - Session window checks support midnight crossing                  |
 //|                                                                    |
-//| DST policy (project specific)                                      |
-//| - Tokyo:   no DST                                                  |
-//| - London:  EU/UK DST (last Sun Mar -> last Sun Oct)                |
-//| - New York:US DST (2nd Sun Mar -> 1st Sun Nov)                     |
-//|                                                                    |
-//| Important                                                          |
-//| - NowByOffsetHours(offsetHours) expects STANDARD offsets:          |
-//|     Tokyo:  +9                                                     |
-//|     London:  0                                                     |
-//|     New York:-5                                                    |
-//|   During DST season, London/New York are shifted by +1 hour.       |
-//| - For fixed offsets (no DST), use NowByOffsetHoursFixed().         |
+//| Notes for public users                                             |
+//| - For session gating, we prefer UTC+offset over broker time.       |
+//|   This makes behavior consistent across brokers and VPS setups.    |
 //+--------------------------------------------------------------------+
 #property strict
 
 #ifndef KUROSAWA_TIME_MQH
 #define KUROSAWA_TIME_MQH
 
+// ------------------------------------------------------------------
+// Clock helpers
+// ------------------------------------------------------------------
 
-//+------------------------------------------------------------------+
-//| Public time helpers                                              |
-//+------------------------------------------------------------------+
+// Returns "now" computed from UTC (TimeGMT) plus a fixed offset (hours).
+// This does not perform DST adjustments.
 datetime NowByOffsetHoursFixed(const int offsetHours)
 {
    return TimeGMT() + (offsetHours * 3600);
@@ -47,36 +39,34 @@ int DateYmd(const datetime t)
    return dt.year * 10000 + dt.mon * 100 + dt.day;
 }
 
+// Convenience: current date (YYYYMMDD) in UTC+fixed offset.
+int NowYmdByOffsetHoursFixed(const int offsetHours)
+{
+   return DateYmd(NowByOffsetHoursFixed(offsetHours));
+}
+
+// ------------------------------------------------------------------
+// Session window (whole hours, supports midnight crossing)
+// ------------------------------------------------------------------
+
 // Returns true if the current time (UTC + fixed offset) is inside
 // the session window [startHour, endHour).
 //
-// - Time base: UTC (TimeGMT), NOT broker/server time.
-// - offsetHours: fixed UTC offset (no DST handling).
-//   Examples:
-//     Tokyo   = +9
-//     London  =  0
-//     NewYork = -5
-//
-// - The window is evaluated in whole hours.
-// - Midnight crossing is supported (e.g. 22 -> 5).
-//
-// Notes:
-// - startHour is inclusive, endHour is exclusive.
-// - This function is deterministic across brokers and machines
-//   because it does not depend on server or local time.
+// - Time base: UTC (TimeGMT), not broker time.
+// - offsetHours: fixed offset, no DST handling.
+// - startHour inclusive, endHour exclusive.
 bool IsTimeWindowByOffsetHours(const int startHour, const int endHour, const int offsetHours)
 {
    MqlDateTime dt;
    TimeToStruct(TimeGMT() + offsetHours * 3600, dt);
 
-   // Normal window (e.g. 9 -> 17)
+   // Normal window (e.g., 9 -> 17)
    if(startHour <= endHour)
       return (dt.hour >= startHour && dt.hour < endHour);
 
-   // Midnight-crossing window (e.g. 22 -> 5)
+   // Midnight-crossing window (e.g., 22 -> 5)
    return (dt.hour >= startHour || dt.hour < endHour);
 }
-
 
 // Minutes of day (00:00 -> 0, 23:59 -> 1439).
 int MinutesOfDay(const datetime t)
@@ -86,26 +76,15 @@ int MinutesOfDay(const datetime t)
    return dt.hour * 60 + dt.min;
 }
 
-// Returns how many whole minutes have passed since openTime.
-// Returns -1 on invalid input.
-int MinutesHeld(const datetime openTime,
-                         const datetime nowTime = 0)
-{
-   if(openTime <= 0)
-      return -1;
-
-   const datetime now = (nowTime > 0) ? nowTime : TimeCurrent();
-   if(now <= openTime)
-      return 0;
-
-   return (int)((now - openTime) / 60);
-}
-
-// Compatibility wrappers (kept to avoid mass refactors).
+// ------------------------------------------------------------------
+// Compatibility wrappers (kept to avoid mass refactors)
+// ------------------------------------------------------------------
 datetime NowJst(const int offsetHours) { return NowByOffsetHoursFixed(offsetHours); }
 int      JstYmd(const datetime t)      { return DateYmd(t); }
 
-
+// ------------------------------------------------------------------
+// Parsing helpers
+// ------------------------------------------------------------------
 ENUM_TIMEFRAMES TimeframeFromString(const string tf)
 {
    if(tf == "M1")  return PERIOD_M1;
