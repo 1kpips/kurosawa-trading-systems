@@ -1,21 +1,21 @@
 ;==================================================
-; London_TrendPullback_EURUSD_M15.set
+; London_SwingTrend_GBPJPY_H1.set (CORRECT)
 ;==================================================
 
 ;-------------------------------
 ; Identity / Meta
 ;-------------------------------
 InpZone=London
-InpEaName=London_TrendPullback_EURUSD_M15
-InpMagic=2026012610
-InpEaId=ea-london-trendpullback-eurusd-m15
-InpEaVersion=0.3.0
+InpEaName=London_SwingTrend_GBPJPY_H1
+InpMagic=2026012608
+InpEaId=ea-london-swingtrend-gbpjpy-h1
+InpEaVersion=0.3.1
 
 ;-------------------------------
 ; Target
 ;-------------------------------
-InpTargetPair=EURUSD
-InpTargetTf=PERIOD_M15
+InpTargetPair=GBPJPY
+InpTargetTf=PERIOD_H1
 
 ;-------------------------------
 ; Tracking
@@ -24,82 +24,91 @@ InpTrackEnable=true
 InpTrackSendOpen=true
 
 ;-------------------------------
-; Session (London)
-; London core hours
+; Session (London in JST)
 ;-------------------------------
-InpStartHour=8
-InpEndHour=17
-InpUtcOffset=0
+InpStartHour=16
+InpEndHour=20
+InpUtcOffset=9
 
 ;-------------------------------
-; Trend bias (higher TF)
-; M15 entry with H1 bias
+; EMA trend
 ;-------------------------------
-InpBiasTF=PERIOD_H1
-InpBiasEmaFast=50
-InpBiasEmaSlow=200
+InpEmaFast=50
+InpEmaSlow=200
+InpUseDirFilter=false
+InpEmaDir=0
 
 ;-------------------------------
-; Entry EMA (pullback)
-;-------------------------------
-InpEntryEma=20
-
-;-------------------------------
-; RSI pullback
-; EURUSD mean pullback sweet spot
+; RSI pullback (SwingTrend-style)
 ;-------------------------------
 InpRsiPeriod=14
-InpRsiBuyBelow=45.0
-InpRsiSellAbove=55.0
+InpRsiBuyBelow=44.0
+InpRsiSellAbove=56.0
+
 InpUseRsiCrossConfirm=false
 InpRsiBuyCrossLevel=0
 InpRsiSellCrossLevel=0
 
 ;-------------------------------
-; ATR window gate (POINTS)
-; Keep EURUSD active but avoid dead chop
+; ADX trend regime
+;-------------------------------
+InpUseAdxFilter=true
+InpAdxPeriod=14
+InpMinAdxToTrade=19.0
+InpMaxAdxToTrade=0.0
+
+;-------------------------------
+; ATR window (CRITICAL FIX)
 ;-------------------------------
 InpAtrPeriod=14
-InpAtrMinPoints=15.0
-InpAtrMaxPoints=0.0
+InpAtrMinPoints=200.0
+InpAtrMaxPoints=1200.0
 
 ;-------------------------------
-; ATR-based stop / target model
-; Trend pullback favors asymmetric R
+; ATR stop model
 ;-------------------------------
-InpSlAtrMult=2.2
-InpTpRMultiple=1.6
-
-;-------------------------------
-; Fixed SL / TP (POINTS)
-; (unused, Excel-aligned)
-;-------------------------------
-InpSlPoints=0.0
-InpTpPoints=0.0
+InpSlAtrMult=2.8
+InpTpRMultiple=1.5
 
 ;-------------------------------
 ; Risk sizing
 ;-------------------------------
 InpUseRiskSizing=true
-InpRiskPercent=0.35
-InpFixedLot=0.05
-InpMaxLotCap=2.0
+InpRiskPercent=0.40
+InpFixedLot=0.03
+InpMaxLotCap=0.0
 
 ;-------------------------------
-; Frequency & Safety Guards
+; Safety guards
 ;-------------------------------
-InpMaxTradesPerDay=2
-InpMaxSpreadPoints=18
+InpMaxTradesPerDay=0
+InpMaxSpreadPoints=45
 InpMaxConsecLosses=3
 InpResetConsecLossDaily=false
 InpDailyLossLimitPercent=2.0
-InpCooldownMinutes=60
+InpCooldownMinutes=120
 InpMaxHoldMinutes=0
 
 ;-------------------------------
-; Optional exits / trailing
+; Placeholders (keep schema)
 ;-------------------------------
+InpUseMinMoveFilter=false
+InpBbPeriod=0
+InpMinMoveSpreadMult=0.0
+InpBbDev=0.0
+
+InpUseWickSignal=false
+InpMinBandBreakPoints=0.0
+InpMinEdgeOverSpread=0.0
+
+InpSlPoints=0.0
+InpTpPoints=0.0
+
 InpUseMidBandExit=false
 InpUseTrailing=false
 InpTrailStartR=0.0
 InpTrailStepAtrMult=0.0
+
+bias_min_gap_points=0.0
+require_ema_slope=true
+require_reclaim=false

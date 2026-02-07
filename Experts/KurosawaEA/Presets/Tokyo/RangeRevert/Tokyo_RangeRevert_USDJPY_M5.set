@@ -1,0 +1,136 @@
+;==================================================
+; Tokyo_RangeRevert_USDJPY_M5.set
+; Engine : RangeRevertEA
+; TF     : M5
+; Pair   : USDJPY
+; Session: Tokyo (JST, fixed UTC offset)
+; Notes  : All distance/volatility values are in POINTS
+;==================================================
+
+;-------------------------------
+; Identity / Meta
+;-------------------------------
+InpZone=Tokyo
+InpEaName=Tokyo_RangeRevert_USDJPY_M5
+InpMagic=2026012704
+InpEaId=ea-tokyo-rangerevert-usdjpy-m5
+InpEaVersion=0.4.4
+
+;-------------------------------
+; Target (intent)
+;-------------------------------
+InpTargetPair=USDJPY
+InpTargetTf=PERIOD_M5
+
+;-------------------------------
+; Tracking
+;-------------------------------
+InpTrackEnable=true
+InpTrackSendOpen=true
+
+;-------------------------------
+; Session (Tokyo in JST, fixed UTC offset)
+; Typical Tokyo cash hours: 09:00 - 16:00 JST
+;-------------------------------
+InpStartHour=9
+InpEndHour=16
+InpUtcOffset=9
+
+;-------------------------------
+; Execution
+;-------------------------------
+InpDeviationPoints=20
+
+;-------------------------------
+; Optional min-move filter (schema)
+; Keep false unless you explicitly use it in the engine
+;-------------------------------
+InpUseMinMoveFilter=false
+InpMinMoveSpreadMult=0.0
+
+;-------------------------------
+; Bollinger Bands (USED)
+;-------------------------------
+InpBbPeriod=26
+InpBbDev=2.0
+
+;-------------------------------
+; RSI (USED)
+;-------------------------------
+InpRsiPeriod=14
+InpRsiBuyBelow=30.0
+InpRsiSellAbove=70.0
+
+;-------------------------------
+; ADX regime filter (schema inputs exist in mqh)
+; If your strategy only uses the MAX gate, keep Min=0.0
+;-------------------------------
+InpUseAdxFilter=true
+InpAdxPeriod=14
+InpMinAdxToTrade=0.0
+InpMaxAdxToTrade=24.0
+
+;-------------------------------
+; ATR window gate (POINTS, USED)
+;-------------------------------
+InpAtrPeriod=14
+InpAtrMinPoints=0.0
+InpAtrMaxPoints=0.0
+
+;-------------------------------
+; Entry behavior
+;-------------------------------
+InpRequireReclaim=false
+
+;-------------------------------
+; Fixed SL/TP (schema placeholders, not used if ATR model is used)
+;-------------------------------
+InpSlPoints=0.0
+InpTpPoints=0.0
+
+;-------------------------------
+; ATR-based stop model (USED)
+; SL(points) = ATR(points) * InpSlAtrMult
+; TP(points) = SL(points)  * InpTpRMultiple
+;-------------------------------
+InpSlAtrMult=2.0
+InpTpRMultiple=1.8
+
+;-------------------------------
+; Risk sizing
+;-------------------------------
+InpUseRiskSizing=true
+InpRiskPercent=0.30
+InpFixedLot=0.05
+InpMaxLotCap=0.0
+
+;-------------------------------
+; Frequency & safety
+;-------------------------------
+InpMaxTradesPerDay=8
+InpMaxSpreadPoints=30
+InpMaxConsecLosses=3
+InpResetConsecLossDaily=false
+InpDailyLossLimitPercent=2.0
+InpCooldownMinutes=20
+InpMaxHoldMinutes=240
+
+;-------------------------------
+; Exit
+;-------------------------------
+InpUseMidBandExit=false
+
+;-------------------------------
+; Trailing (schema-compatible, optional)
+;-------------------------------
+InpUseTrailing=false
+InpTrailStartR=0.0
+InpTrailStepAtrMult=0.0
+
+;-------------------------------
+; EMA placeholders (unused in RangeRevert, kept for schema)
+;-------------------------------
+InpEmaFast=0
+InpEmaSlow=0
+InpUseDirFilter=false
+InpEmaDir=0

@@ -1,0 +1,132 @@
+;==================================================
+; NY_RangeRevert_EURUSD_M1.set
+; Engine : RangeRevertEA
+; TF     : M1
+; Pair   : EURUSD
+; Session: New York 
+;==================================================
+
+;-------------------------------
+; Identity / Meta
+;-------------------------------
+InpZone=NewYork
+InpEaName=NY_RangeRevert_EURUSD_M1
+InpMagic=2026020401
+InpEaId=ea-ny-rangerevert-eurusd-m1
+InpEaVersion=0.4.4
+
+;-------------------------------
+; Target
+;-------------------------------
+InpTargetPair=EURUSD
+InpTargetTf=PERIOD_M1
+
+;-------------------------------
+; Tracking
+;-------------------------------
+InpTrackEnable=true
+InpTrackSendOpen=true
+
+;-------------------------------
+; Session (New York late session, JST)
+; Focus on post-volatility mean reversion
+;-------------------------------
+InpStartHour=0
+InpEndHour=4
+InpUtcOffset=9
+
+;-------------------------------
+; Execution
+;-------------------------------
+InpDeviationPoints=20
+
+;-------------------------------
+; Bollinger Bands
+; Slightly wider bands for NY volatility
+;-------------------------------
+InpUseMinMoveFilter=false
+InpBbPeriod=20
+InpMinMoveSpreadMult=0.0
+InpBbDev=1.9
+
+;-------------------------------
+; RSI
+; Trade only extreme overbought / oversold
+;-------------------------------
+InpUseRsiCrossConfirm=false
+InpRsiBuyCrossLevel=0.0
+InpRsiSellCrossLevel=0.0
+InpRsiPeriod=18
+InpRsiBuyBelow=36.0
+InpRsiSellAbove=88.0
+
+;-------------------------------
+; Entry quality filters (critical)
+;-------------------------------
+InpRequireReclaim=false
+InpUseWickSignal=true
+InpMinBandBreakPoints=25.0
+InpMinEdgeOverSpread=1.6
+
+;-------------------------------
+; ADX regime filter
+; Block strong trend conditions
+;-------------------------------
+InpUseAdxFilter=false
+InpAdxPeriod=14
+InpMinAdxToTrade=0.0
+InpMaxAdxToTrade=0.0
+
+;-------------------------------
+; ATR volatility window (POINTS)
+;-------------------------------
+InpAtrPeriod=14
+InpAtrMinPoints=14.0
+InpAtrMaxPoints=90.0
+
+;-------------------------------
+; Risk sizing
+; Conservative for NY session
+;-------------------------------
+InpUseRiskSizing=true
+InpRiskPercent=0.15
+InpFixedLot=0.01
+InpMaxLotCap=1.0
+
+;-------------------------------
+; Safety / frequency limits
+;-------------------------------
+InpMaxTradesPerDay=6
+InpMaxSpreadPoints=20
+InpMaxConsecLosses=2
+InpResetConsecLossDaily=true
+InpDailyLossLimitPercent=1.2
+InpCooldownMinutes=20
+InpMaxHoldMinutes=45
+
+;-------------------------------
+; Exit logic
+;-------------------------------
+InpUseMidBandExit=true
+
+;-------------------------------
+; Trailing stop (disabled)
+;-------------------------------
+InpUseTrailing=false
+InpTrailStartR=0.0
+InpTrailStepAtrMult=0.0
+
+;-------------------------------
+; ATR-based stop model
+; Faster exits for NY mean reversion
+;-------------------------------
+InpSlAtrMult=2.0
+InpTpRMultiple=2.6
+
+;-------------------------------
+; EMA placeholders (unused)
+;-------------------------------
+InpEmaFast=0
+InpEmaSlow=0
+InpUseDirFilter=false
+InpEmaDir=0
