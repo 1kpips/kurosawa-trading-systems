@@ -1,4 +1,4 @@
-//+--------------------------------------------------------------------+
+﻿//+--------------------------------------------------------------------+
 //| File: Helpers/KurosawaTime.mqh                                     |
 //| Type: Include Library                                              |
 //| Ver : 0.2.0                                                        |
@@ -8,12 +8,18 @@
 //|                                                                    |
 //| Design                                                             |
 //| - Self-contained: no dependency on other Kurosawa helper files     |
-//| - Uses UTC (TimeGMT) as the base clock for deterministic behavior  |
+//| - Base clock is BROKER SERVER time (TimeTradeServer), NOT TimeGMT  |
 //| - Session window checks support midnight crossing                  |
 //|                                                                    |
-//| Notes for public users                                             |
-//| - For session gating, we prefer UTC+offset over broker time.       |
-//|   This makes behavior consistent across brokers and VPS setups.    |
+//| Why server time (changed 2026-09-09, was TimeGMT)                  |
+//| - In the Strategy Tester TimeGMT() IS server time, so every        |
+//|   backtest gated sessions in server hours. Live, TimeGMT() is real |
+//|   UTC. On OANDA Japan (UTC+2/+3) that is a 2-3 h shift between     |
+//|   what was tested and what would run. One clock in both places is  |
+//|   the only way "proven in the tester" means anything live.         |
+//| - Consequence: InpUtcOffset is hours added to SERVER time, and a   |
+//|   session is pinned to server hours (which follow the broker's NY  |
+//|   DST convention). Label sessions in server time, not UTC.         |
 //+--------------------------------------------------------------------+
 #property strict
 
@@ -24,11 +30,18 @@
 // Clock helpers
 // ------------------------------------------------------------------
 
-// Returns "now" computed from UTC (TimeGMT) plus a fixed offset (hours).
+// The one clock every engine gates on. TimeTradeServer() is the broker's
+// clock in both the tester and live; TimeGMT() is not (see header).
+datetime EngineClock()
+{
+   return TimeTradeServer();
+}
+
+// Returns "now" on the engine clock plus a fixed offset (hours).
 // This does not perform DST adjustments.
 datetime NowByOffsetHoursFixed(const int offsetHours)
 {
-   return TimeGMT() + (offsetHours * 3600);
+   return EngineClock() + (offsetHours * 3600);
 }
 
 // Converts a datetime into an integer YYYYMMDD.
@@ -46,19 +59,50 @@ int NowYmdByOffsetHoursFixed(const int offsetHours)
 }
 
 // ------------------------------------------------------------------
+// Unified "trading day" clock
+// ------------------------------------------------------------------
+// ONE definition of when the trading day rolls over, shared by BOTH
+// the risk manager (daily loss limit / trade counters) and the daily
+// report roll. Built on the engine clock (server time) so the tester and
+// live agree on when a day ends.
+//
+//   0 = server midnight (OANDA Japan: 21:00/22:00 UTC, i.e. the NY close)
+//   9 = server + 9h     -- change here to move the boundary suite-wide
+#define KUROSAWA_TRADING_DAY_UTC_OFFSET 0
+
+// "Now" on the trading-day clock (for day-of-year detection in risk).
+datetime TradingDayNow()
+{
+   return NowByOffsetHoursFixed(KUROSAWA_TRADING_DAY_UTC_OFFSET);
+}
+
+// Current trading-day date as YYYYMMDD (for the daily report roll).
+int TradingDayYmd()
+{
+   return NowYmdByOffsetHoursFixed(KUROSAWA_TRADING_DAY_UTC_OFFSET);
+}
+
+// ------------------------------------------------------------------
 // Session window (whole hours, supports midnight crossing)
 // ------------------------------------------------------------------
+// DST WARNING (by design): these windows use a FIXED UTC offset and do
+// NOT auto-adjust for daylight saving. So a window pinned to a local
+// market session (e.g. London open) drifts by 1 hour twice a year when
+// that region flips DST but the fixed offset does not. This is a
+// deliberate tradeoff for determinism/reproducibility across brokers.
+// To track a wall-clock session precisely, adjust the EA's InpUtcOffset
+// (or start/end hours) seasonally. UTC-anchored windows are unaffected.
 
-// Returns true if the current time (UTC + fixed offset) is inside
+// Returns true if the current time (engine clock + fixed offset) is inside
 // the session window [startHour, endHour).
 //
-// - Time base: UTC (TimeGMT), not broker time.
+// - Time base: broker server time (EngineClock), same in tester and live.
 // - offsetHours: fixed offset, no DST handling.
 // - startHour inclusive, endHour exclusive.
 bool IsTimeWindowByOffsetHours(const int startHour, const int endHour, const int offsetHours)
 {
    MqlDateTime dt;
-   TimeToStruct(TimeGMT() + offsetHours * 3600, dt);
+   TimeToStruct(EngineClock() + offsetHours * 3600, dt);
 
    // Normal window (e.g., 9 -> 17)
    if(startHour <= endHour)

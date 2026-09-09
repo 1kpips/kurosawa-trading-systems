@@ -1,4 +1,4 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //| File: Helpers/KurosawaExecUtils.mqh                              |
 //| Type: Include Library                                            |
 //| Ver : 0.1.0                                                      |
@@ -45,6 +45,47 @@ string ResolveEngineSymbol(const string targetPair, const string chartSymbol)
    return (StringLen(targetPair) > 0 ? targetPair : chartSymbol);
 }
 
+// Guard against attaching an EA to the wrong chart.
+//
+// ResolveEngineSymbol above means the EA trades InpTargetPair regardless of which
+// chart it sits on. That is deliberate, but it also means a wrong attach trades a
+// DIFFERENT instrument than the chart displays, and the only signal was a warning
+// that scrolled past. With strict on, the mismatch fails init loudly instead.
+//
+// Returns false only when strict is on AND the chart does not match. Logs either way.
+bool ChartMatchesTarget(const string targetPair,
+                        const ENUM_TIMEFRAMES targetTf,
+                        const bool strict)
+{
+   const string tag = (strict ? "INIT_FAILED" : "Warning");
+   bool ok = true;
+
+   if(StringLen(targetPair) > 0 && _Symbol != targetPair)
+   {
+      PrintFormat("%s: intended symbol=%s but chart symbol=%s", tag, targetPair, _Symbol);
+      ok = false;
+   }
+
+   // PERIOD_CURRENT (0) is a legitimate value meaning "use whatever chart I am on":
+   // MQL5 resolves 0 to the current timeframe in iATR/iTime/CopyBuffer, so the EA
+   // works correctly with it. It is also the FIRST entry in MT5's timeframe
+   // dropdown, so an input that was never set sits there. Treat it as a wildcard,
+   // exactly as an empty targetPair is treated above - do not reject it.
+   if(targetTf != PERIOD_CURRENT && _Period != targetTf)
+   {
+      PrintFormat("%s: intended TF=%s but chart TF=%s", tag,
+                  EnumToString(targetTf), EnumToString((ENUM_TIMEFRAMES)_Period));
+      ok = false;
+   }
+
+   if(!ok && strict)
+      PrintFormat("Attach to a %s %s chart, or load the matching preset from MQL5 Presets."
+                  " Set InpStrictChartMatch=false to run cross-chart on purpose.",
+                  targetPair, EnumToString(targetTf));
+
+   return (ok || !strict);
+}
+
 // Safe digit lookup (fallback to _Digits)
 int SymbolDigitsSafe(const string sym)
 {
@@ -63,6 +104,82 @@ double SymbolPointSafe(const string sym)
 double NormalizePrice(const string sym, const double price)
 {
    return NormalizeDouble(price, SymbolDigitsSafe(sym));
+}
+
+// ------------------------------------------------------------------
+// Broker distance constraints
+//
+// STOPS_LEVEL and FREEZE_LEVEL are DIFFERENT constraints and must not be
+// merged:
+//   STOPS_LEVEL  - minimum distance from market at which an SL/TP may be
+//                  PLACED. Applies when sending or modifying.
+//   FREEZE_LEVEL - a band around the market inside which an existing
+//                  position's SL/TP may NOT be modified and the position may
+//                  not be closed. Says nothing about where a stop may sit.
+// Taking max(stops, freeze) as a placement minimum (the previous behaviour)
+// silently widens every stop on brokers with a large freeze level, which
+// inflates realized risk per trade, while leaving the real freeze constraint
+// unchecked on modify/close.
+// ------------------------------------------------------------------
+
+// Minimum SL/TP placement distance, in PRICE units.
+double StopsDistance(const string sym)
+{
+   const int pts = (int)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
+   return (double)(pts > 0 ? pts : 0) * SymbolPointSafe(sym);
+}
+
+// Freeze band half-width, in PRICE units. 0 on most FX symbols.
+double FreezeDistance(const string sym)
+{
+   const int pts = (int)SymbolInfoInteger(sym, SYMBOL_TRADE_FREEZE_LEVEL);
+   return (double)(pts > 0 ? pts : 0) * SymbolPointSafe(sym);
+}
+
+// The price the SERVER validates a position's SL/TP against:
+// Bid closes a long, Ask closes a short.
+double CloseSidePrice(const string sym, const bool isBuy)
+{
+   return SymbolInfoDouble(sym, isBuy ? SYMBOL_BID : SYMBOL_ASK);
+}
+
+// Round a price onto the symbol's TICK grid.
+// NormalizePrice only rounds to DIGITS, which is not the same thing whenever
+// SYMBOL_TRADE_TICK_SIZE > SYMBOL_POINT (indices, some metals and CFDs); an
+// off-grid price is rejected by the server. dir: -1 floor, +1 ceil, 0 nearest.
+double RoundToTick(const string sym, const double price, const int dir)
+{
+   double ts = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+   if(ts <= 0.0)
+      ts = SymbolPointSafe(sym);
+   if(ts <= 0.0)
+      return NormalizePrice(sym, price);
+
+   const double q = price / ts;
+   double n;
+   if(dir < 0)      n = MathFloor(q + 1e-8);
+   else if(dir > 0) n = MathCeil(q - 1e-8);
+   else             n = MathRound(q);
+
+   return NormalizeDouble(n * ts, SymbolDigitsSafe(sym));
+}
+
+// True if `price` sits inside the broker's freeze band around the market, i.e.
+// the server will refuse a modify/close that involves it.
+bool InFreezeBand(const string sym, const bool isBuy, const double price)
+{
+   if(price <= 0.0)
+      return false;
+
+   const double fz = FreezeDistance(sym);
+   if(fz <= 0.0)
+      return false;   // no freeze band on this symbol
+
+   const double ref = CloseSidePrice(sym, isBuy);
+   if(ref <= 0.0)
+      return false;
+
+   return (MathAbs(ref - price) < fz);
 }
 
 // ------------------------------------------------------------------
@@ -151,24 +268,31 @@ bool IsNewClosedBar(const string sym, const ENUM_TIMEFRAMES tf, datetime &lastCl
 // SL/TP validation (broker stops/freeze level)
 // ------------------------------------------------------------------
 
-// Adjusts SL/TP if needed to satisfy broker min distance constraints.
+// Adjusts SL/TP if needed to satisfy the broker's minimum placement distance.
 // Parameters
-// - entry: reference price (typically current market price at send time)
-// - sl/tp: in/out (may be adjusted)
-// - isBuy: true=BUY, false=SELL
+// - entry   : the fill/reference price the caller derived sl/tp from. Used for
+//             DIRECTION sanity only (a long's stop must sit below its entry).
+// - refClose: the price the SERVER measures SL/TP distance against - Bid for a
+//             long, Ask for a short. Measuring from `entry` instead overstates
+//             the distance by exactly the spread, so an order can pass local
+//             validation and still be rejected with 10016 Invalid stops. That
+//             recurs precisely at news and rollover, when the spread is widest.
+// - sl/tp   : in/out (may be widened, never tightened)
+// - isBuy   : true=BUY, false=SELL
 // - requireTp: if true, tp must be present and valid
 //
 // Returns false if constraints cannot be satisfied.
-bool EnsureStopsLevel(
+bool EnsureStopsLevelRef(
    const string sym,
    const double entry,
+   const double refClose,
    double &sl,
    double &tp,
    const bool isBuy,
    const bool requireTp
 )
 {
-   if(entry <= 0.0)
+   if(entry <= 0.0 || refClose <= 0.0)
       return false;
 
    const double pt = SymbolPointSafe(sym);
@@ -181,43 +305,46 @@ bool EnsureStopsLevel(
    if(requireTp && tp <= 0.0)
       return false;
 
-   // Broker constraints in points
-   const int stopsPts  = (int)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL);
-   const int freezePts = (int)SymbolInfoInteger(sym, SYMBOL_TRADE_FREEZE_LEVEL);
-
-   // Use the stricter minimum distance
-   int minPts = stopsPts;
-   if(freezePts > minPts) minPts = freezePts;
-   if(minPts < 1) minPts = 1;
-
-   const double minDist = (double)minPts * pt;
+   // Placement minimum is STOPS_LEVEL only. FREEZE_LEVEL is a modify/close
+   // constraint and is checked separately at those call sites.
+   double minDist = StopsDistance(sym);
+   if(minDist < pt)
+      minDist = pt;   // never allow a zero-width stop
 
    if(isBuy)
    {
-      // Direction sanity
+      // Direction sanity is measured against the entry price...
       if(sl >= entry)               sl = entry - minDist;
       if(tp > 0.0 && tp <= entry)   tp = entry + minDist;
 
-      // Minimum distance
-      if(entry - sl < minDist)      sl = entry - minDist;
-      if(tp > 0.0 && tp - entry < minDist) tp = entry + minDist;
+      // ...but the minimum distance is measured against the price the server
+      // validates - Bid for a long.
+      if(refClose - sl < minDist)             sl = refClose - minDist;
+      if(tp > 0.0 && tp - refClose < minDist) tp = refClose + minDist;
+
+      // Snap onto the tick grid AWAY from the market, so rounding can never
+      // pull a level back inside the minimum distance.
+      sl = RoundToTick(sym, sl, -1);
+      if(tp > 0.0)
+         tp = RoundToTick(sym, tp, +1);
    }
    else
    {
-      // Direction sanity
       if(sl <= entry)               sl = entry + minDist;
       if(tp > 0.0 && tp >= entry)   tp = entry - minDist;
 
-      // Minimum distance
-      if(sl - entry < minDist)      sl = entry + minDist;
-      if(tp > 0.0 && entry - tp < minDist) tp = entry - minDist;
+      if(sl - refClose < minDist)             sl = refClose + minDist;
+      if(tp > 0.0 && refClose - tp < minDist) tp = refClose - minDist;
+
+      sl = RoundToTick(sym, sl, +1);
+      if(tp > 0.0)
+         tp = RoundToTick(sym, tp, -1);
    }
 
-   sl = NormalizePrice(sym, sl);
-   if(tp > 0.0)
-      tp = NormalizePrice(sym, tp);
-
-   // Final sanity
+   // Final sanity: direction must still hold after every adjustment. If a
+   // required TP was pushed to the wrong side of entry (possible when the
+   // spread exceeds the requested TP distance), stand down rather than send a
+   // target that cannot be profitable.
    if(isBuy)
    {
       if(sl >= entry) return false;
@@ -232,12 +359,34 @@ bool EnsureStopsLevel(
    return true;
 }
 
+// Back-compat wrapper: derives the server-side reference price from the current
+// market. Prefer EnsureStopsLevelRef and hand it the bid/ask you already read,
+// so validation and the order itself use one consistent snapshot.
+bool EnsureStopsLevel(
+   const string sym,
+   const double entry,
+   double &sl,
+   double &tp,
+   const bool isBuy,
+   const bool requireTp
+)
+{
+   const double refClose = CloseSidePrice(sym, isBuy);
+   if(refClose <= 0.0)
+      return false;
+
+   return EnsureStopsLevelRef(sym, entry, refClose, sl, tp, isBuy, requireTp);
+}
+
 // ------------------------------------------------------------------
 // Position selection helpers (one-position-per-symbol+magic)
 // ------------------------------------------------------------------
 
-// Selects a position by (symbol, magic). Returns true if selected.
-bool PositionSelectByMagic(const string symbol, const long magic)
+// Returns the ticket of the FIRST position matching (symbol, magic), or 0 if none.
+// On a match, that position is left SELECTED (PositionGet* then refer to it).
+// Prefer this for close/modify so CTrade acts on the RIGHT position by ticket,
+// not by symbol (critical on hedging accounts running multiple EAs per symbol).
+ulong PositionTicketByMagic(const string symbol, const long magic)
 {
    for(int i = PositionsTotal() - 1; i >= 0; --i)
    {
@@ -248,9 +397,15 @@ bool PositionSelectByMagic(const string symbol, const long magic)
       if(PositionGetString(POSITION_SYMBOL) != symbol) continue;
       if((long)PositionGetInteger(POSITION_MAGIC) != magic) continue;
 
-      return true;
+      return ticket;
    }
-   return false;
+   return 0;
+}
+
+// Selects a position by (symbol, magic). Returns true if selected.
+bool PositionSelectByMagic(const string symbol, const long magic)
+{
+   return (PositionTicketByMagic(symbol, magic) != 0);
 }
 
 // Returns true if there is a position for (symbol, magic).
@@ -293,8 +448,10 @@ bool Position_CheckMaxHoldExit(
    if(maxHoldMinutes <= 0)
       return false;
 
-   if(!PositionSelectByMagic(sym, magic))
+   const ulong ticket = PositionTicketByMagic(sym, magic);
+   if(ticket == 0)
       return false;
+   // ticket is now the selected position (see PositionTicketByMagic)
 
    const datetime openTime = (datetime)PositionGetInteger(POSITION_TIME);
    const int heldMin = _MinutesHeld(openTime, nowTime);
@@ -302,7 +459,18 @@ bool Position_CheckMaxHoldExit(
    if(heldMin < 0 || heldMin < maxHoldMinutes)
       return false;
 
-   return trader.PositionClose(sym);
+   // Freeze band: the server refuses to close a position whose SL/TP sits too
+   // close to the market. Skip this tick and retry on the next one rather than
+   // burning a rejected close request.
+   const bool   isBuyPos = ((long)PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+   const double slCur    = PositionGetDouble(POSITION_SL);
+   const double tpCur    = PositionGetDouble(POSITION_TP);
+
+   if((slCur > 0.0 && InFreezeBand(sym, isBuyPos, slCur)) ||
+      (tpCur > 0.0 && InFreezeBand(sym, isBuyPos, tpCur)))
+      return false;
+
+   return trader.PositionClose(ticket); // close by TICKET, not symbol (hedging-safe)
 }
 
 // ------------------------------------------------------------------
@@ -337,7 +505,8 @@ bool Position_ManageAtrTrailing(
    if(trailStartR <= 0.0 || trailStepAtrMult <= 0.0)
       return false;
 
-   if(!PositionSelectByMagic(sym, magic))
+   const ulong ticket = PositionTicketByMagic(sym, magic);
+   if(ticket == 0)
       return false;
 
    const long  type  = (long)PositionGetInteger(POSITION_TYPE);
@@ -364,12 +533,7 @@ bool Position_ManageAtrTrailing(
    if(step <= 0.0)
       return false;
 
-   // 3) Initial risk reference (PRICE)
-   const double riskRef = isBuy ? (entry - slCur) : (slCur - entry);
-   if(riskRef <= 0.0)
-      return false;
-
-   // 4) Current market price
+   // 3) Current market price
    const double bid = SymbolInfoDouble(sym, SYMBOL_BID);
    const double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
    if(bid <= 0.0 || ask <= 0.0)
@@ -378,12 +542,21 @@ bool Position_ManageAtrTrailing(
       return false;
    }
 
-   const double px     = isBuy ? bid : ask;
-   const double profit = isBuy ? (px - entry) : (entry - px);
+   const double px = isBuy ? bid : ask;
 
-   // Do not trail until we reach minimum profit in R terms
-   if(profit < (trailStartR * riskRef))
-      return false;
+   // 4) Start-trailing gate based on the CURRENT risk distance to SL.
+   //    While SL is still on the risk side of entry (riskRef > 0), require profit to
+   //    reach trailStartR * risk before trailing. Once SL has locked breakeven+
+   //    (riskRef <= 0) we are already trailing in profit, so keep trailing. This
+   //    fixes the previous freeze: SL past entry made riskRef negative and the
+   //    function bailed out, so the stop stopped advancing when most in profit.
+   const double riskRef = isBuy ? (entry - slCur) : (slCur - entry);
+   if(riskRef > 0.0)
+   {
+      const double profit = isBuy ? (px - entry) : (entry - px);
+      if(profit < (trailStartR * riskRef))
+         return false;
+   }
 
    // 5) Candidate SL: keep it step behind price; never loosen
    double slNew = slCur;
@@ -399,22 +572,56 @@ bool Position_ManageAtrTrailing(
       if(cand < slCur) slNew = cand;
    }
 
-   slNew = NormalizePrice(sym, slNew);
    if(slNew == slCur)
       return false;
 
-   // 6) Validate broker constraints before applying
-   double slTry = slNew;
-   double tpTry = tpCur;
+   // 6) Broker constraints.
+   //
+   // Do NOT route this through EnsureStopsLevel: that validates against the
+   // position's ENTRY price, and its buy branch rewrites any stop at or above
+   // entry back to (entry - minDist). A trailing stop sits above entry by
+   // definition once in profit, so every trail was being discarded and the
+   // position pinned at breakeven. Worse, the discarded value equalled the
+   // current SL, so a no-op PositionModify went to the server on every tick -
+   // CTrade reports TRADE_RETCODE_NO_CHANGES as failure, so it also counted a
+   // block_orderfail per tick.
+   //
+   // Validate against the CURRENT market on the closing side, and REJECT when
+   // the candidate is too close rather than relocating it.
+   const double minDist = StopsDistance(sym);
 
-   if(!EnsureStopsLevel(sym, entry, slTry, tpTry, isBuy, false))
+   if(isBuy)
    {
-      diag_block_stops++;
-      return false;
+      if(px - slNew < minDist) { diag_block_stops++; return false; }
+   }
+   else
+   {
+      if(slNew - px < minDist) { diag_block_stops++; return false; }
    }
 
-   // 7) Apply modification
-   if(!trader.PositionModify(sym, slTry, tpTry))
+   // Freeze band: inside it the server refuses to modify the position at all.
+   // Not an error - skip this tick and retry once price has moved out.
+   if(InFreezeBand(sym, isBuy, slCur) || InFreezeBand(sym, isBuy, slNew))
+      return false;
+
+   if(tpCur > 0.0 && InFreezeBand(sym, isBuy, tpCur))
+      return false;
+
+   // Snap to the tick grid, away from the market so rounding cannot breach
+   // minDist. Comparing to the current stop AFTER rounding is what stops a
+   // sub-tick "change" from becoming a pointless modify request.
+   slNew = RoundToTick(sym, slNew, isBuy ? -1 : +1);
+
+   const double pt = SymbolPointSafe(sym);
+   if(MathAbs(slNew - slCur) < pt * 0.5)
+      return false;
+
+   // Never loosen, even after rounding.
+   if(isBuy  && slNew <= slCur) return false;
+   if(!isBuy && slNew >= slCur) return false;
+
+   // 7) Apply modification (TP is left untouched)
+   if(!trader.PositionModify(ticket, slNew, tpCur))
    {
       diag_block_orderfail++;
       return false;
@@ -500,6 +707,7 @@ void RR_LogTradeFail(CTrade &execTrade, const string tag)
 bool RR_CheckMidBandExitAndClose(
    CTrade &execTrade,
    const string sym,
+   const long magic,
    const int hBbHandle,
    const bool useMidBandExit,
    const bool isBuy
@@ -518,10 +726,25 @@ bool RR_CheckMidBandExitAndClose(
    if(bid <= 0.0 || ask <= 0.0)
       return false;
 
-   if(isBuy  && bid >= bbMid) return execTrade.PositionClose(sym);
-   if(!isBuy && ask <= bbMid) return execTrade.PositionClose(sym);
+   const bool hit = (isBuy && bid >= bbMid) || (!isBuy && ask <= bbMid);
+   if(!hit)
+      return false;
 
-   return false;
+   // Close by TICKET (hedging-safe), not by symbol.
+   const ulong ticket = PositionTicketByMagic(sym, magic);
+   if(ticket == 0)
+      return false;
+
+   // Freeze band: the server refuses to close while SL/TP is too close to the
+   // market. Skip this tick; the mid-band condition will still hold next tick.
+   const double slCur = PositionGetDouble(POSITION_SL);
+   const double tpCur = PositionGetDouble(POSITION_TP);
+
+   if((slCur > 0.0 && InFreezeBand(sym, isBuy, slCur)) ||
+      (tpCur > 0.0 && InFreezeBand(sym, isBuy, tpCur)))
+      return false;
+
+   return execTrade.PositionClose(ticket);
 }
 
 

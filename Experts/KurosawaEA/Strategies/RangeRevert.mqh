@@ -282,6 +282,7 @@ RangeRevertResult RangeRevert_EvaluateHandles(
    const ENUM_TIMEFRAMES tf,
    const int shift,
    const double point,
+   const double spread_points,   // spread in POINTS, supplied by caller (0 disables the edge-over-spread filter)
    const RangeRevertInputs &inps,
    RangeRevertSignal &outSig)
 {
@@ -313,12 +314,10 @@ RangeRevertResult RangeRevert_EvaluateHandles(
    // Convert ATR from PRICE to POINTS
    const double atr_points = atrPrice / point;
 
-   // Spread in POINTS (if symbol info is available)
-   double spread_points = 0.0;
-   const double ask = SymbolInfoDouble(symbol, SYMBOL_ASK);
-   const double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
-   if(ask > 0.0 && bid > 0.0)
-      spread_points = (ask - bid) / point;
+   // Spread is caller-supplied (see signature). Keeping this module free of
+   // live market reads makes the signal a pure function of closed-bar inputs
+   // and avoids the Strategy-Tester fail-open where SYMBOL_ASK/BID can read 0
+   // (which would silently skip the edge-over-spread quality filter).
 
    // Convert penetration distances to POINTS before calling EvaluateValues
    // We pass the original PRICE highs/lows and BB values, but EvaluateValues expects

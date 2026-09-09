@@ -1,170 +1,143 @@
-//+------------------------------------------------------------------+
-//| File: Inputs/TrendPullbackEA_Inputs.mqh                          |
-//| EA  : TrendPullbackEA (generic engine preset via .set)           |
-//| Ver : 0.3.0                                                      |
+﻿//+------------------------------------------------------------------+
+//| File: Inputs/TrendPullback_Inputs.mqh                            |
+//| EA  : TrendPullbackEA                                            |
+//| Ver : 0.4.1                                                      |
 //|                                                                  |
 //| Notes                                                            |
-//| - Repo-wide schema inputs (Excel-aligned).                       |
-//| - Strategy logic uses EMA-bias (HTF) + EMA reclaim (LTF) + RSI.  |
-//| - Volatility + stops are points-based in engine/strategy.        |
-//| - Some inputs are placeholders to keep one unified column set.   |
+//| - Inputs-only file for TrendPullbackEA (preset via .set).        |
+//| - Strategy: HTF EMA bias + LTF EMA reclaim + RSI confirm.        |
+//| - All distance-based values are in POINTS (_Point units).        |
+//| - No unused schema placeholders are defined here.                |
 //+------------------------------------------------------------------+
 #property strict
+
 #ifndef KUROSAWA_TRENDPULLBACKEA_INPUTS_MQH
 #define KUROSAWA_TRENDPULLBACKEA_INPUTS_MQH
 
-//==================================================================
+// ==================================================================
 // Identity / Meta
-//==================================================================
-input string InpZone               = "NewYork";
-input string InpEaName             = "TrendPullbackEA";
-input int    InpMagic              = 2026011703;
-input string InpEaId               = "engine-trendpullback";
-input string InpEaVersion          = "0.3.0";
+// Columns: InpZone, InpEaName, InpMagic, InpEaId, InpEaVersion
+// ==================================================================
+input string InpZone      = "NewYork";
+input string InpEaName    = "NewYork_TrendPullback_EURUSD_M5";
+// Magic must be unique per RUNNING INSTANCE - see the registry in
+// Helpers/KurosawaHelpers.mqh. Two EAs sharing a magic on one symbol will
+// enumerate and close each other's positions.
+input int    InpMagic     = 2026090303;
+input string InpEaId      = "ea-ny-trendpullback-eurusd-m5";
+// 0.4.2 = engine clock -> broker server time (2026-09-09)
+input string InpEaVersion = "0.4.2";
+// The TUNE version - one set of parameter values. Bumped on ANY parameter
+// change. Distinct from InpEaVersion above, which is the ENGINE build.
+// Presets and backtests on 1kpips.com key on this field, not on InpEaVersion.
+input string InpPresetVersion = "0.1.0";
 
-//==================================================================
+// ==================================================================
 // Target
-//==================================================================
+// Columns: InpTargetPair, InpTargetTf
+// ==================================================================
 input string          InpTargetPair = "EURUSD";
 input ENUM_TIMEFRAMES InpTargetTf   = PERIOD_M5;
+// ==================================================================
+// Safety: refuse to run on a chart that does not match the target
+// Columns: InpStrictChartMatch
+// ==================================================================
+input bool InpStrictChartMatch = true;
 
-//==================================================================
+
+// ==================================================================
 // Tracking
-//==================================================================
-input bool   InpTrackEnable         = true;
-input bool   InpTrackSendOpen       = true;
+// Columns: InpTrackEnable, InpTrackSendOpen
+// ==================================================================
+input bool InpTrackEnable   = true;
+input bool InpTrackSendOpen = true;
 
-//==================================================================
+// ==================================================================
 // Session (fixed UTC offset; JST=+9)
-//==================================================================
-input int    InpStartHour           = 22;
-input int    InpEndHour             = 5;
-input int    InpUtcOffset           = 9;
+// Columns: InpStartHour, InpEndHour, InpUtcOffset
+// ==================================================================
+input int InpStartHour = 22;
+input int InpEndHour   = 5;
+input int InpUtcOffset = 9;
 
-//==================================================================
-// EMA / Direction (schema placeholder; not used by this engine)
-//==================================================================
-input int    InpEmaFast             = 0;
-input int    InpEmaSlow             = 0;
-input bool   InpUseDirFilter        = false;
-input int    InpEmaDir              = 0;
+// ==================================================================
+// Execution (order tolerance)
+// Columns: InpDeviationPoints
+// ==================================================================
+input int InpDeviationPoints = 20; // slippage tolerance (points)
 
-//==================================================================
-// Min-move filter (schema placeholder; not used)
-//==================================================================
-input bool   InpUseMinMoveFilter    = false;
-input double InpMinMoveSpreadMult   = 0.0;
+// ==================================================================
+// RSI confirm (entry timing)
+// Columns: InpRsiPeriod, InpRsiBuyBelow, InpRsiSellAbove
+// ==================================================================
+input int    InpRsiPeriod    = 14;
+input double InpRsiBuyBelow  = 45.0;
+input double InpRsiSellAbove = 55.0;
 
-//==================================================================
-// Bollinger Bands (schema placeholder; not used)
-//==================================================================
-input int    InpBbPeriod            = 0;
-input double InpBbDev               = 0.0;
+// ==================================================================
+// ATR window gate (POINTS)
+// Columns: InpAtrPeriod, InpAtrMinPoints, InpAtrMaxPoints
+// - If InpAtrMaxPoints <= 0, max gate is disabled
+// ==================================================================
+input int    InpAtrPeriod    = 14;
+input double InpAtrMinPoints = 0.0;
+input double InpAtrMaxPoints = 0.0;
 
-//==================================================================
-// RSI (USED by TrendPullback strategy)
-//==================================================================
-input int    InpRsiPeriod           = 14;
-input double InpRsiBuyBelow         = 45.0;  // buy when RSI <= this
-input double InpRsiSellAbove        = 55.0;  // sell when RSI >= this
+// ==================================================================
+// Risk sizing
+// Columns: InpUseRiskSizing, InpRiskPercent, InpFixedLot, InpMaxLotCap
+// ==================================================================
+input bool   InpUseRiskSizing = true;
+input double InpRiskPercent   = 0.35;
+input double InpFixedLot      = 0.05;
+input double InpMaxLotCap     = 0.0;
 
-//==================================================================
-// RSI cross confirm (schema placeholder; not used)
-//==================================================================
-input bool   InpUseRsiCrossConfirm  = false;
-input int    InpRsiBuyCrossLevel    = 0;
-input int    InpRsiSellCrossLevel   = 0;
+// ==================================================================
+// Frequency & Safety Guards
+// Columns: InpMaxTradesPerDay, InpMaxSpreadPoints, InpMaxConsecLosses,
+//          InpResetConsecLossDaily, InpDailyLossLimitPercent,
+//          InpCooldownMinutes, InpMaxHoldMinutes
+// ==================================================================
+input int    InpMaxTradesPerDay       = 0;   // 0 = unlimited (engine policy)
+input int    InpMaxSpreadPoints       = 20;
 
-//==================================================================
-// Wick signal (schema placeholder; not used)
-//==================================================================
-input bool   InpUseWickSignal       = false;
-input double InpMinBandBreakPips    = 0.0;
-input double InpMinEdgeOverSpread   = 0.0;
-
-//==================================================================
-// ADX filter (schema placeholder; not used)
-//==================================================================
-input bool   InpUseAdxFilter        = false;
-input int    InpAdxPeriod           = 0;
-input double InpMinAdxToTrade       = 0.0;
-input double InpMaxAdxToTrade       = 0.0;
-
-//==================================================================
-// ATR window gate (POINTS) (USED)
-//==================================================================
-input int    InpAtrPeriod           = 14;
-input double InpAtrMinPoints        = 0.0;   // 0 = disabled
-input double InpAtrMaxPoints        = 0.0;   // 0 = disabled
-
-//==================================================================
-// Fixed SL/TP (POINTS) (schema placeholder; not used by this EA)
-//==================================================================
-input double InpSlPoints            = 0.0;
-input double InpTpPoints            = 0.0;
-
-//==================================================================
-// Risk sizing (USED)
-//==================================================================
-input bool   InpUseRiskSizing       = true;
-input double InpRiskPercent         = 0.35;
-input double InpFixedLot            = 0.05;
-input double InpMaxLotCap           = 0.0;
-
-//==================================================================
-// Frequency & Safety Guards (USED by engine)
-//==================================================================
-input int    InpMaxTradesPerDay      = 0;      // 0 = disabled
-input int    InpMaxSpreadPoints      = 20;
-
-input int    InpMaxConsecLosses      = 3;
-input bool   InpResetConsecLossDaily = false;
+input int    InpMaxConsecLosses       = 3;
+// Must stay true: consecLosses only resets on a win, so with this false the EA
+// halts permanently after N losses - it cannot win because it cannot trade.
+input bool   InpResetConsecLossDaily  = true;
 
 input double InpDailyLossLimitPercent = 2.0;
-input int    InpCooldownMinutes      = 45;
-input int    InpMaxHoldMinutes       = 0;      // 0 = disabled
+input int    InpCooldownMinutes       = 45;
+input int    InpMaxHoldMinutes        = 0;   // 0 = disabled
 
-//==================================================================
-// Exit / Trailing (schema placeholder; not used)
-//==================================================================
-input bool   InpUseMidBandExit       = false;
+// ==================================================================
+// Trailing (optional; engine-managed)
+// Columns: InpUseTrailing, InpTrailStartR, InpTrailStepAtrMult
+// ==================================================================
+input bool   InpUseTrailing      = false;
+input double InpTrailStartR      = 0.0;
+input double InpTrailStepAtrMult = 0.0;
 
-input bool   InpUseTrailing          = false;
-input double InpTrailStartR          = 0.0;
-input double InpTrailStepAtrMult     = 0.0;
+// ==================================================================
+// ATR-based stop model
+// Columns: InpSlAtrMult, InpTpRMultiple
+// ==================================================================
+input double InpSlAtrMult   = 2.2;
+input double InpTpRMultiple = 1.4;
 
-//==================================================================
-// ATR-based stop model (USED)
-//==================================================================
-input double InpSlAtrMult            = 2.2;   // SL(points) = ATR(points) * mult
-input double InpTpRMultiple          = 1.4;   // TP(points) = SL(points) * R
-
-//==================================================================
-// Strategy-specific (non-schema but stable across TrendPullback)
-//==================================================================
+// ==================================================================
+// Strategy-specific (TrendPullback)
+// ==================================================================
 
 // Higher-TF bias
-input ENUM_TIMEFRAMES InpBiasTf      = PERIOD_M15;
-input int    InpBiasEmaFast          = 50;
-input int    InpBiasEmaSlow          = 200;
+// Columns: InpBiasTf, InpBiasEmaFast, InpBiasEmaSlow, InpBiasMinGapPoints
+input ENUM_TIMEFRAMES InpBiasTf           = PERIOD_M15;
+input int             InpBiasEmaFast      = 50;
+input int             InpBiasEmaSlow      = 200;
+input double          InpBiasMinGapPoints = 0.0; // 0 = classic fast>slow bias
 
 // Entry reclaim EMA (on entry TF)
-input int    InpEntryEma             = 20;
-
-// Bias strength (points). 0 = classic fast>slow bias
-input double InpBiasMinGapPoints     = 0.0;
-
-// Optional market-activity range filter
-input bool            InpUseMarketRangeFilter    = true;
-input ENUM_TIMEFRAMES InpRangeTf                = PERIOD_M5;
-
-input int             InpRangeWindowStartHour   = 8;
-input int             InpRangeWindowStartMinute = 0;
-input int             InpRangeWindowEndHour     = 12;
-input int             InpRangeWindowEndMinute   = 0;
-
-input int             InpRangeMinPoints         = 35;
-input int             InpRangeMaxPoints         = 0;     // 0 = disabled
-input bool            InpRangeRequireWindowDone = true;
+// Column: InpEntryEma
+input int InpEntryEma = 20;
 
 #endif // KUROSAWA_TRENDPULLBACKEA_INPUTS_MQH

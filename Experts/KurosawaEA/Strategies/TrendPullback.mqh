@@ -6,7 +6,7 @@
 //| TrendPullback signal logic (signal generation only).             |
 //| - Higher-TF bias: EMA(fast/slow) gap                             |
 //| - Entry-TF reclaim: close crosses back over entry EMA            |
-//| - RSI confirmation                                               |
+//| - RSI confirmation, taken on the PULLBACK bar (shift+1)          |
 //| - ATR volatility window gate (POINTS)                            |
 //|                                                                  |
 //| Notes                                                            |
@@ -42,9 +42,10 @@ struct TrendPullbackInputs
    double atr_min_points;
    double atr_max_points;
 
-   // RSI confirmation
-   double rsi_buy_max;      // buy when RSI <= this
-   double rsi_sell_min;     // sell when RSI >= this
+   // RSI confirmation, measured on the PULLBACK bar (shift+1), not the reclaim
+   // bar. See TrendPullback_EvaluateHandles for why.
+   double rsi_buy_max;      // buy when the pullback bar's RSI was <= this
+   double rsi_sell_min;     // sell when the pullback bar's RSI was >= this
 
    // Bias gap threshold (POINTS). 0 => classic fast>slow bias.
    double bias_min_gap_points;
@@ -86,7 +87,7 @@ TrendPullbackResult TrendPullback_EvaluateValues(
    const double biasEmaFast, const double biasEmaSlow,
    const double entryEma_1,  const double entryEma_2,
    const double close_1,     const double close_2,
-   const double rsi,
+   const double rsiPullback,
    const double atr_points,
    const double point,
    const TrendPullbackInputs &inps,
@@ -99,7 +100,7 @@ TrendPullbackResult TrendPullback_EvaluateValues(
    // Basic data sanity
    if(point <= 0.0) return TRENDPB_ERROR_DATA;
    if(!MathIsValidNumber(atr_points) || atr_points <= 0.0) return TRENDPB_ERROR_DATA;
-   if(!MathIsValidNumber(rsi) || rsi < 0.0 || rsi > 100.0) return TRENDPB_ERROR_DATA;
+   if(!MathIsValidNumber(rsiPullback) || rsiPullback < 0.0 || rsiPullback > 100.0) return TRENDPB_ERROR_DATA;
 
    // ATR window gate
    if((inps.atr_min_points > 0.0 && atr_points < inps.atr_min_points) ||
@@ -120,10 +121,12 @@ TrendPullbackResult TrendPullback_EvaluateValues(
    const bool reclaimedUp   = (close_2 <= entryEma_2 && close_1 > entryEma_1);
    const bool reclaimedDown = (close_2 >= entryEma_2 && close_1 < entryEma_1);
 
-   if(upBias && reclaimedUp && rsi <= inps.rsi_buy_max)
+   // rsiPullback is read on the PULLBACK bar, so "RSI was oversold, then price
+   // reclaimed the EMA" - the two conditions now agree instead of fighting.
+   if(upBias && reclaimedUp && rsiPullback <= inps.rsi_buy_max)
       outSig.buy = true;
 
-   if(downBias && reclaimedDown && rsi >= inps.rsi_sell_min)
+   if(downBias && reclaimedDown && rsiPullback >= inps.rsi_sell_min)
       outSig.sell = true;
 
    // Safety: never allow both directions at once
@@ -172,10 +175,18 @@ TrendPullbackResult TrendPullback_EvaluateHandles(
    if(!TrendPullback_ReadBuffer1(hEntryEmaLocal, 0, shift,   e1)) return TRENDPB_ERROR_DATA;
    if(!TrendPullback_ReadBuffer1(hEntryEmaLocal, 0, shift+1, e2)) return TRENDPB_ERROR_DATA;
 
-   // RSI + ATR (entry TF, closed bar)
-   double rsi = 0.0, atrPrice = 0.0;
-   if(!TrendPullback_ReadBuffer1(hRsiLocal, 0, shift, rsi))      return TRENDPB_ERROR_DATA;
-   if(!TrendPullback_ReadBuffer1(hAtrLocal, 0, shift, atrPrice)) return TRENDPB_ERROR_DATA;
+   // RSI is read on the PULLBACK bar (shift+1), NOT the reclaim bar.
+   //
+   // The reclaim trigger below requires close_1 to cross back ABOVE the entry
+   // EMA. On that bar RSI is by definition recovering through ~50, so demanding
+   // rsi <= 45 on the SAME bar fights the trigger: the two conditions can only
+   // both hold on the weakest possible reclaims, which is why this EA produced
+   // almost no trades. Reading the previous bar restores the intended meaning -
+   // "RSI was oversold on the pullback, and then price reclaimed the EMA" - and
+   // leaves InpRsiBuyBelow / InpRsiSellAbove meaning exactly what they say.
+   double rsiPullback = 0.0, atrPrice = 0.0;
+   if(!TrendPullback_ReadBuffer1(hRsiLocal, 0, shift + 1, rsiPullback)) return TRENDPB_ERROR_DATA;
+   if(!TrendPullback_ReadBuffer1(hAtrLocal, 0, shift,     atrPrice))    return TRENDPB_ERROR_DATA;
    if(!MathIsValidNumber(atrPrice) || atrPrice <= 0.0)           return TRENDPB_ERROR_DATA;
 
    // Close prices (entry TF, closed bars)
@@ -191,7 +202,7 @@ TrendPullbackResult TrendPullback_EvaluateHandles(
       bFast, bSlow,
       e1, e2,
       c1, c2,
-      rsi,
+      rsiPullback,
       atr_points,
       point,
       inps,

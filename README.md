@@ -2,254 +2,120 @@
 
 Systematic **MetaTrader 5 (MT5)** Expert Advisors and shared infrastructure for disciplined, session-aware algorithmic trading.
 
-The **KurosawaEA** suite is designed as a *portfolio of independent systems*, prioritizing **capital protection, execution safety, and long-term robustness** over short-term backtest optimization.
+Everything in this repository is published — the strategy modules, the engines, the tuned `.set` files, and the shared execution and risk layer. The only thing kept out is the API key the engines use to report their results (see *Secrets* below). The results themselves are published too, run by run, at **https://1kpips.com/en/presets**, including every tune that failed and why.
 
 ---
 
 ## Design Philosophy
 
-All systems in this repository follow these non-negotiable principles:
-
 ### 1. Closed-Bar Logic Only
-All trading decisions are made using **confirmed (closed) candles** only.  
-No live-bar logic, no repainting indicators.
-
-This guarantees that **live behavior matches backtest behavior**.
-
----
+All trading decisions are made using **confirmed (closed) candles** only.
+No live-bar logic, no repainting indicators. Live behaviour matches backtest behaviour.
 
 ### 2. One EA, One Position
-Each EA enforces:
-- a **unique Magic Number**
-- **maximum one open position per EA**
-
-This prevents signal interference and simplifies portfolio-level risk attribution.
-
----
+Each engine instance enforces a **unique magic number** and **at most one open position**.
+The magic registry lives in `Helpers/KurosawaHelpers.mqh`; every chart instance gets its own slot.
 
 ### 3. Session-Aware Execution
-Every EA is explicitly bound to a **market session**:
-- Tokyo  
-- London  
-- New York  
-
-Trades are allowed only during defined liquidity windows, with **safe handling of midnight-crossing sessions**.
-
----
+Every preset is bound to a session window on the **broker's server clock** — the same clock
+the Strategy Tester uses, so what is tested is what runs. See `Presets/README.md` for how
+the hours map to UTC.
 
 ### 4. Execution Safety Over Frequency
-Trade frequency is intentionally constrained using:
-- spread filters  
-- cooldown timers  
-- daily loss limits  
-- consecutive loss protection  
-- volatility (ATR) safety windows  
+Spread cap, cooldown, daily loss limit, consecutive-loss stop, ATR floor, broker
+stops/freeze-level compliance. Missing a trade is always preferred over entering a bad one.
 
-Missing a trade is always preferred over entering a low-quality one.
+### 5. Values Live in `.set` Files
+Engines and strategies contain logic. `Inputs/*.mqh` declares the inputs with sensible
+defaults and the engine's version; `Presets/*.set` carries the values that actually ran.
+Every `.set` records its own version (`InpPresetVersion`) and the engine build it was
+tested on (`InpEaVersion`), and both are filed with every published result.
 
----
-
-### 5. Preset-Driven Configuration (No Hard-Coded Inputs)
-**All actual trading parameters live in `.set` files**, not in code.
-
-- EAs and strategies contain **logic only**
-- Parameters are injected via **Preset `.set` files**
-- Inputs `.mqh` files exist only as placeholders for MT5 input binding
-
-This enables:
-- rapid strategy iteration
-- clean symbol / timeframe switching
-- zero code changes when tuning parameters
+### 6. Tested Before Traded
+A tune is promoted only through a written gate — out-of-sample window, sample size,
+degradation limits, parameter stability, honest costs, build match, drawdown, and
+"every window positive". The gate and each preset's status (`candidate`, `proven`,
+`live`, `rejected`) are on the site, with the reasons.
 
 ---
 
 ## Repository Structure
 
 ```text
-/Experts/KurosawaEA/
-├── Engines/                  # Execution-only MQ5 engines
+Experts/KurosawaEA/
+├── Engines/                 # MT5 lifecycle + execution; strategy-agnostic
 │   ├── RangeRevertEA.mq5
-│   ├── ScalpEA.mq5
-│   ├── SwingTrendEA.mq5
-│   └── TrendPullbackEA.mq5
-│
-├── Strategies/               # Signal judgment only (NO execution)
+│   ├── TrendEA.mq5
+│   ├── TrendPullbackEA.mq5
+│   └── Archived/            # retired engines, kept for the record
+├── Strategies/              # closed-bar signal judgment only, no execution
 │   ├── RangeRevert.mqh
-│   ├── Scalp.mqh
-│   ├── SwingTrend.mqh
-│   └── TrendPullback.mqh
-│
-├── Helpers/                  # Shared infrastructure (umbrella)
-│   ├── KurosawaHelpers.mqh        # Umbrella include
-│   ├── KurosawaPositionUtils.mqh
-│   ├── KurosawaRiskManager.mqh
-│   ├── KurosawaSignalUtils.mqh
-│   ├── KurosawaTime.mqh
-│   └── KurosawaTradeUtils.mqh
-│
-├── Inputs/                   # Placeholder only (NOT used at runtime)
-│   ├── RangeRevert_Inputs.mqh
-│   ├── Scalp_Inputs.mqh
-│   ├── SwingTrend_Inputs.mqh
-│   └── TrendPullback_Inputs.mqh
-│
-├── Presets/                  # Actual trading parameters
-│   ├── Tokyo/
-│   │   ├── Tokyo_Scalp_USDJPY_M5.set
-│   │   ├── Tokyo_RangeRevert_USDJPY_M5.set
-│   │   └── Tokyo_SwingTrend_USDJPY_H1.set
-│   ├── London/
-│   │   ├── London_RangeRevert_EURGBP_M5.set
-│   │   ├── London_Scalp_EURUSD_M5.set
-│   │   └── London_SwingTrend_GBPJPY_H1.set
-│   └── NewYork/
-│       ├── NewYork_TrendPullback_NZDUSD_M15.set
-│       └── NewYork_SwingTrend_USDCAD_H1.set
----
+│   ├── Trend.mqh
+│   ├── TrendPullback.mqh
+│   └── Archived/
+├── Inputs/                  # input declarations, defaults, engine version
+├── Helpers/                 # shared infrastructure
+│   ├── KurosawaHelpers.mqh        # umbrella include + magic registry
+│   ├── KurosawaExecutor.mqh       # one order path for all engines
+│   ├── KurosawaExecUtils.mqh      # stops/freeze levels, trailing, exits
+│   ├── KurosawaRiskManager.mqh    # sizing, daily limits, loss streaks
+│   ├── KurosawaIndicatorFactory.mqh
+│   ├── KurosawaTime.mqh           # engine clock and session windows
+│   ├── KurosawaTrack.mqh          # reports closed trades to 1kpips.com
+│   ├── KurosawaSignalPublisher.mqh
+│   └── KurosawaSecrets.example.mqh
+├── Signals/                 # D1 analyzers: post direction/strength, place no trades
+└── Presets/                 # the tunes, by session — see Presets/README.md
+    ├── London/  NewYork/  Tokyo/  Screening/
 ```
 
-## Architecture Overview
+---
 
-### Execution Engines (`Engines/*.mq5`)
+## Engines, Strategies, Helpers
 
-Execution engines are responsible for **all MT5 lifecycle and execution logic**.
+**Engines** own `OnInit` / `OnTick` / `OnTimer` / `OnTradeTransaction`, the safety gates, sizing,
+SL/TP placement and exits. They call a strategy module once per closed bar and act on its answer.
 
-They perform the following tasks:
+**Strategies** answer one question on one closed bar — buy, sell, or nothing — from indicator
+values passed in. No broker calls, no state, no execution.
 
-- Handle MT5 lifecycle events  
-  (`OnInit`, `OnTick`, `OnTradeTransaction`)
-- Apply global safety gates  
-  (session window, spread filter, cooldown, daily limits)
-- Execute trades  
-  (SL / TP placement, position sizing, exit handling)
-- Call strategy modules for **closed-bar signal judgment only**
-
-Each engine is **strategy-agnostic** and contains **no market logic** beyond execution control.
+**Helpers** hold everything execution-critical once: broker stops/freeze compliance, volume
+normalisation, the risk manager, the order path, the clock. No engine reimplements any of it.
 
 ---
 
-### Strategy Modules (`Strategies/*.mqh`)
+## Building
 
-Strategy modules are responsible for **signal judgment only**.
+Open `Engines/*.mq5` and `Signals/*.mq5` in MetaEditor and compile, or from a shell:
 
-Characteristics:
-
-- Pure signal evaluation
-- Closed-bar logic only
-- No execution logic
-- No broker interaction
-- No position or risk management
-
-Strategies answer **one question only**:
-
-> Should we BUY, SELL, or do NOTHING on this closed bar?
-
----
-
-### Shared Infrastructure (`Helpers/*.mqh`)
-
-#### KurosawaHelpers.mqh (Umbrella)
-
-`KurosawaHelpers.mqh` is the **single include point** for all shared utilities.
-
-- No EA reimplements this logic locally
-- All execution-critical calculations are centralized
-
-**Provided functionality:**
-
-- Session & time management (JST / broker time)
-- Pip & price normalization (JPY / non-JPY)
-- Broker `StopsLevel` / `FreezeLevel` compliance
-- Volume normalization
-- ATR & ADX regime filters
-- Trade safety helpers
-
-All EAs behave consistently because **all critical math lives here**.
-
----
-
-### Inputs Folder (Placeholder Only)
-
-```text
-/Inputs/*.mqh
+```
+MetaEditor64.exe /compile:"<path>\Experts\KurosawaEA\Engines\RangeRevertEA.mq5" /log
 ```
 
-- Exists only to satisfy MT5 input binding
-- Values are **not used**
-- All real parameters come from `.set` files
+Before the first compile, copy `Helpers/KurosawaSecrets.example.mqh` to
+`Helpers/KurosawaSecrets.mqh`. Without a real key the engines still trade; they just fail
+to report, and say so in the log.
 
-This design allows you to:
+## Running a Preset
 
-- Create your own `.set` files
-- Choose any symbol and timeframe
-- Reuse the same EA binary safely
-
----
-
-### Presets (`Presets/{Session}/`)
-
-Preset naming convention:
-
-```text
-Presets/{MarketSession}/{MarketSession}_{Strategy}_{Pair}_{TF}.set
-```
-
-Example:
-
-```text
-Tokyo_SwingTrend_USDJPY_H1.set
-```
-
-Presets define:
-
-- Session window
-- Indicators
-- Risk model
-- Filters
-- SL / TP behavior
-- Tracking options
-
-**This is the only place you should tune parameters.**
+1. Select the **engine** in the Strategy Tester or drag it onto the chart.
+2. `Inputs → Load` the `.set` — the engine refuses to start on a symbol or timeframe that
+   does not match the preset (`InpStrictChartMatch`).
+3. Backtest first. File the result. Then, and only then, a chart.
 
 ---
 
-## Risk & Safety Controls
+## Secrets
 
-Every EA enforces:
-
-- Risk-based position sizing (or safe fixed-lot fallback)
-- Daily loss limits
-- Maximum consecutive loss protection
-- Spread filters
-- Cooldown timers
-- Maximum one position per Magic Number
-
-These controls are **mandatory**, not optional.
-
----
-
-## Usage Notes
-
-- Always attach EAs to their intended symbol and timeframe
-- Load the corresponding `.set` file before enabling AutoTrading
-- Demo-test all configurations before live deployment
-- Never mix presets across sessions or symbols
+`Helpers/KurosawaSecrets.mqh` holds the ingest API key and is git-ignored. It is the only
+private file. If you fork this and run it, use your own endpoint or leave the placeholder.
 
 ---
 
 ## Disclaimer
 
-### Risk Warning
-
-Trading foreign exchange on margin carries a high level of risk and may not be suitable for all investors.  
-Losses can exceed initial deposits.
-
-### No Investment Advice
-
-This repository is provided for educational and research purposes only.  
-No guarantees of profitability are made or implied.
-
-### No Liability
-
-The authors and contributors assume no responsibility for any trading losses incurred through the use of this software.  
+Trading foreign exchange on margin carries a high level of risk and may not be suitable for
+all investors. Losses can exceed deposits. This repository is provided for educational and
+research purposes only; nothing in it is investment advice, and no guarantee of profitability
+is made or implied. The authors assume no responsibility for losses incurred through its use.
 Past performance does not guarantee future results.

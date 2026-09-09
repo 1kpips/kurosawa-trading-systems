@@ -12,6 +12,7 @@
 //| 1) Keep OnTradeTransaction wrapper:                              |
 //|    Track_OnTradeTransaction(                                     |
 //|       InpTrackEnable, trans, InpEaId, InpEaName, InpEaVersion,   |
+//|       InpPresetVersion,                                          |
 //|       InpMagic, InpTrackSendOpen,                                |
 //|       g_lastOpenDealId, g_lastCloseDealId,                       |
 //|       g_consecLosses, g_lastCloseTime,                           |
@@ -33,10 +34,27 @@
 //+------------------------------------------------------------------+
 #property strict
 
+#ifndef KUROSAWA_TRACK_MQH
+#define KUROSAWA_TRACK_MQH
+
+// The real key lives in the git-ignored KurosawaSecrets.mqh, shared with the
+// signal EAs. Do not paste a literal key here: this file used to carry the
+// placeholder "1kpips-secret-key", which the ingest API rejects, so every
+// OPEN/CLOSE post failed authentication and no trade was ever recorded.
+#include "KurosawaSecrets.mqh"
+
+// PositionTicketByMagic() - the hedging-safe position lookup used by
+// Track_OnNewBar and the OPEN handler. Included explicitly rather than relying
+// on the KurosawaHelpers.mqh umbrella pulling it in first: the engines happen to
+// include ExecUtils ahead of this file, but MetaEditor's "Compile All" builds
+// every header standalone, where that ordering does not exist. Both headers are
+// include-guarded, so pulling it in twice is free.
+#include "KurosawaExecUtils.mqh"
+
 // ------------------------------------------------------------------
-// Secrets live here (keep this file out of git)
+// Endpoint
 // ------------------------------------------------------------------
-static string TRACK_API_KEY   = "1kpips-secret-key";
+static string TRACK_API_KEY   = KUROSAWA_API_KEY;
 static string TRACK_API_URL   = "https://1kpips.com/api/track/record";
 static int    HTTP_TIMEOUT_MS = 5000;
 
@@ -117,9 +135,14 @@ struct DailyDiag
 //+------------------------------------------------------------------+
 //|                                                                  |
 //+------------------------------------------------------------------+
+// True JST calendar day, broker-independent.
+// NOTE: live engines now roll the day via KurosawaTime's TradingDayYmd()
+// (unified UTC clock). This is kept for legacy/archived callers; it uses
+// TimeGMT() (real UTC) + JST offset, NOT TimeCurrent(), so it no longer
+// depends on the broker's server timezone.
 int NowYmdJst()
   {
-   datetime t = TimeCurrent() + JST_UTC_OFFSET * 3600;
+   datetime t = TimeGMT() + JST_UTC_OFFSET * 3600;
    MqlDateTime dt;
    TimeToStruct(t, dt);
    return dt.year * 10000 + dt.mon * 100 + dt.day;
@@ -424,6 +447,7 @@ bool TrackSendRecord(
    const string eaId,
    const string eaName,
    const string eaVersion,
+   const string presetVersion,
 
    const string eventType,    // "OPEN" / "CLOSE"
    const string eventId,      // stable/idempotent
@@ -477,10 +501,12 @@ bool TrackSendRecord(
 
    const string body = StringFormat(
                           "{\"eaId\":\"%s\",\"eaName\":\"%s\",\"eaVersion\":\"%s\","
+                          "\"presetVersion\":\"%s\","
                           "\"eventId\":\"%s\",\"eventType\":\"%s\","
                           "\"symbol\":\"%s\",\"side\":\"%s\","
                           "\"volume\":%s,\"price\":%s,\"profit\":%s,\"currency\":\"%s\"}",
                           eaId, eaName, eaVersion,
+                          presetVersion,
                           eventId, eventType,
                           symbol, side,
                           DoubleToString(volume, 3),
@@ -501,13 +527,42 @@ bool TrackSendRecord(
    char   res_data[];
    string res_headers;
 
-   ResetLastError();
-   const int status = WebRequest("POST", apiUrl, headers, timeoutMs, data, res_data, res_headers);
-   const int err = GetLastError();
+   // Bounded retry. Records carry an eventId, so the server can dedupe a
+   // resend -> safe to retry TRANSIENT failures (WebRequest -1 / HTTP 5xx,
+   // which almost certainly never processed). A 4xx is a permanent client
+   // rejection: do not retry it.
+   const int maxAttempts = 3;   // 1 initial try + up to 2 retries
 
-   if(status == -1)
+   for(int attempt = 1; attempt <= maxAttempts; ++attempt)
      {
-      Print("TrackSendRecord: WebRequest failed. err=", err, " url=", apiUrl, " tag=", debugTag);
+      ArrayFree(res_data);
+      ResetLastError();
+      const int status = WebRequest("POST", apiUrl, headers, timeoutMs, data, res_data, res_headers);
+      const int err = GetLastError();
+
+      if(status >= 200 && status < 300)
+         return true; // success
+
+      const bool transient = (status == -1 || status >= 500);
+
+      if(status == -1)
+         Print("TrackSendRecord: WebRequest failed. err=", err, " url=", apiUrl,
+               " tag=", debugTag, " attempt=", attempt, "/", maxAttempts);
+      else
+        {
+         const string resp = (ArraySize(res_data) > 0) ? CharArrayToString(res_data) : "";
+
+         // 401/403 means the key is wrong or revoked. That is a silent,
+         // permanent outage of the whole track-record pipeline, so name it
+         // loudly rather than letting it read as one more failed POST.
+         if(status == 401 || status == 403)
+            Print("TRACK AUTH FAILED (", status, ") - the ingest API rejected the API key. ",
+                  "No trades are being recorded. Check KurosawaSecrets.mqh. tag=", debugTag);
+         else
+            Print("Track API Error. Status=", status, " tag=", debugTag, " resp=", resp,
+                  " attempt=", attempt, "/", maxAttempts);
+        }
+
       if(DEBUG_LOG_PAYLOAD_ON_ERROR)
         {
          string bodyShort = body;
@@ -515,25 +570,14 @@ bool TrackSendRecord(
             bodyShort = StringSubstr(bodyShort, 0, 900) + "...";
          Print("Track API Payload: ", bodyShort);
         }
-      return false;
+
+      if(!transient || attempt == maxAttempts)
+         return false; // permanent failure, or out of retries
+
+      Sleep(400); // brief backoff before retry
      }
 
-   if(status < 200 || status >= 300)
-     {
-      const string resp = (ArraySize(res_data) > 0) ? CharArrayToString(res_data) : "";
-      Print("Track API Error. Status=", status, " tag=", debugTag, " resp=", resp);
-
-      if(DEBUG_LOG_PAYLOAD_ON_ERROR)
-        {
-         string bodyShort = body;
-         if(StringLen(bodyShort) > 900)
-            bodyShort = StringSubstr(bodyShort, 0, 900) + "...";
-         Print("Track API Payload: ", bodyShort);
-        }
-      return false;
-     }
-
-   return true;
+   return false;
   }
 
 // ------------------------------------------------------------------
@@ -569,10 +613,14 @@ void Track_OnNewBar(
    if(!enable)
       return;
 
-// Only 1 position per EA instance (your pattern).
-   if(!PositionSelect(symbol))
-      return;
-   if((int)PositionGetInteger(POSITION_MAGIC) != expectedMagic)
+// One position per EA instance. Select by MAGIC, not by symbol: this account is
+// hedging, where PositionSelect(symbol) picks an arbitrary position for that
+// symbol. With two EAs on one pair it would select the other EA's position, the
+// magic check would reject it, and this EA's own position would never be
+// sampled. PositionTicketByMagic leaves the matched position selected.
+// (It comes from KurosawaExecUtils.mqh, included ahead of this file by the
+// KurosawaHelpers.mqh umbrella.)
+   if(PositionTicketByMagic(symbol, (long)expectedMagic) == 0)
       return;
 
    const long posId = (long)PositionGetInteger(POSITION_IDENTIFIER);
@@ -742,6 +790,7 @@ void Track_OnTradeTransaction(
    const string               eaId,
    const string               eaName,
    const string               eaVersion,
+   const string               presetVersion,
 
    const int                  expectedMagic,
    const bool                 sendOpen,
@@ -755,10 +804,15 @@ void Track_OnTradeTransaction(
    const string               expectedSymbol
 )
   {
-   if(!Track_IsEnabled(enable))
-      return;
    if(trans.type != TRADE_TRANSACTION_DEAL_ADD)
       return;
+
+   // Reporting (HTTP POST + CSV ledger) is suppressed in the tester/optimizer
+   // and by the caller's toggle. The loss-streak bookkeeping further down is
+   // NOT gated on it: consecLosses feeds the risk guard, so it has to behave
+   // identically in a backtest and live. Gating it here is what made every
+   // optimization run trade through losing streaks that live would have halted.
+   const bool reportingOn = Track_IsEnabled(enable);
 
    const datetime now = TimeCurrent();
    HistorySelect(now - HISTORY_WINDOW_SEC, now + 60);
@@ -807,7 +861,7 @@ void Track_OnTradeTransaction(
 // ---------------------------------------------------------------
    if(entry == DEAL_ENTRY_IN)
      {
-      if(!sendOpen)
+      if(!reportingOn || !sendOpen)
          return;
       if(trans.deal == lastOpenDealId)
          return;
@@ -837,14 +891,15 @@ void Track_OnTradeTransaction(
       s.bars_held = 0;
       s.active = true;
 
-      // Try to pull SL/TP from current position (may be available right after entry)
-      if(PositionSelect(symbol))
+      // Try to pull SL/TP from the current position (usually available right
+      // after entry). Select by MAGIC, not by symbol - on a hedging account
+      // PositionSelect(symbol) can return another EA's position on the same
+      // pair, the magic check then rejects it, and this trade's SL/TP would be
+      // recorded as 0 in the ledger.
+      if(PositionTicketByMagic(symbol, (long)expectedMagic) != 0)
         {
-         if((int)PositionGetInteger(POSITION_MAGIC) == expectedMagic)
-           {
-            s.sl = PositionGetDouble(POSITION_SL);
-            s.tp = PositionGetDouble(POSITION_TP);
-           }
+         s.sl = PositionGetDouble(POSITION_SL);
+         s.tp = PositionGetDouble(POSITION_TP);
         }
 
       TrackUpsertState(s);
@@ -854,7 +909,7 @@ void Track_OnTradeTransaction(
                          TRACK_API_URL,
                          HTTP_TIMEOUT_MS,
                          TRACK_API_KEY,
-                         eaId, eaName, eaVersion,
+                         eaId, eaName, eaVersion, presetVersion,
                          "OPEN",
                          eventId,
                          symbol,
@@ -883,8 +938,14 @@ void Track_OnTradeTransaction(
          return;
       lastCloseDealId = trans.deal;
 
+      // Risk bookkeeping — runs in the tester and with tracking off, because
+      // the loss-streak gate depends on it. Everything below this point is
+      // reporting only.
       consecLosses  = (profit < 0.0) ? (consecLosses + 1) : 0;
       lastCloseTime = TimeCurrent();
+
+      if(!reportingOn)
+         return;
 
       string posSide = dealSide; // fallback only
 
@@ -948,7 +1009,7 @@ void Track_OnTradeTransaction(
                          TRACK_API_URL,
                          HTTP_TIMEOUT_MS,
                          TRACK_API_KEY,
-                         eaId, eaName, eaVersion,
+                         eaId, eaName, eaVersion, presetVersion,
                          "CLOSE",
                          eventId,
                          symbol,
@@ -966,4 +1027,6 @@ void Track_OnTradeTransaction(
       return;
      }
   }
+
+#endif // KUROSAWA_TRACK_MQH
 //+------------------------------------------------------------------+

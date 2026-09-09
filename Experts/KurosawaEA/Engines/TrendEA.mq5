@@ -1,4 +1,4 @@
-﻿//+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
 //| File: Engines/TrendEA.mq5                                        |
 //| Type: Engine (MT5 events + execution)                            |
 //| Ver : 0.5.1                                                      |
@@ -87,96 +87,25 @@ DailyDiag g_diag;
 //+------------------------------------------------------------------+
 bool PlaceTrade(const string sym, const bool isBuy, const double slPts, const double tpPts)
 {
-   // Defensive: strategy or math must never send non-positive distances
-   if(slPts <= 0.0 || tpPts <= 0.0)
-      return false;
+   // Build this engine's execution config; the shared executor
+   // (Helpers/KurosawaExecutor.mqh) handles sizing, POINTS->price SL/TP,
+   // broker stop/freeze validation, a supported filling mode, and send-retry.
+   ExecConfig cfg;
+   cfg.magic           = (ulong)InpMagic;
+   cfg.eaName          = InpEaName;
+   cfg.eaVersion       = InpEaVersion;
+   cfg.deviationPoints = (int)InpDeviationPoints;
+   cfg.useRiskSizing   = InpUseRiskSizing;
+   cfg.riskPercent     = InpRiskPercent;
+   cfg.fixedLot        = InpFixedLot;
+   cfg.maxLotCap       = InpMaxLotCap;
+   cfg.requireTp       = true;   // Trend places a fixed TP
+   cfg.maxSendRetries  = 2;
 
-   // 1) Position sizing
-   // Risk_CalcTradeVolume handles:
-   // - Risk % sizing when enabled
-   // - Fixed lot fallback
-   // - Max lot cap enforcement
-   const double vol = Risk_CalcTradeVolume(
-      sym,
-      slPts,
-      InpUseRiskSizing,
-      InpRiskPercent,
-      InpFixedLot,
-      InpMaxLotCap
+   return Exec_PlaceTrade(
+      trade, sym, isBuy, slPts, tpPts, cfg, g_risk,
+      g_diag.trades, g_diag.block_orderfail, g_diag.block_indfail, g_diag.block_stops
    );
-
-   if(vol <= 0.0)
-   {
-      // Treat as order fail because it blocks execution (e.g., tiny balance, invalid settings)
-      g_diag.block_orderfail++;
-      return false;
-   }
-
-   // 2) Get current prices for entry calculation
-   const double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
-   const double bid = SymbolInfoDouble(sym, SYMBOL_BID);
-   if(ask <= 0.0 || bid <= 0.0)
-   {
-      g_diag.block_indfail++;
-      return false;
-   }
-
-   const double entry = isBuy ? ask : bid;
-
-   // 3) Convert points -> price
-   const double pt = SymbolInfoDouble(sym, SYMBOL_POINT);
-   if(pt <= 0.0)
-   {
-      g_diag.block_indfail++;
-      return false;
-   }
-
-   double sl = 0.0;
-   double tp = 0.0;
-
-   if(isBuy)
-   {
-      sl = entry - slPts * pt;
-      tp = entry + tpPts * pt;
-   }
-   else
-   {
-      sl = entry + slPts * pt;
-      tp = entry - tpPts * pt;
-   }
-
-   // 4) Validate SL/TP vs broker constraints (stops level/freeze level)
-   // EnsureStopsLevel may adjust SL/TP slightly if needed; returns false if impossible.
-   if(!EnsureStopsLevel(sym, entry, sl, tp, isBuy, true))
-   {
-      g_diag.block_stops++;
-      return false;
-   }
-
-   // 5) Configure executor (magic + slippage/deviation)
-   trade.SetExpertMagicNumber((int)InpMagic);
-   trade.SetDeviationInPoints((int)InpDeviationPoints);
-
-   // 6) Send order with a readable comment to help users debug
-   const string base = InpEaName + "|" + InpEaVersion;
-   bool ok = false;
-
-   if(isBuy) ok = trade.Buy(vol, sym, 0.0, sl, tp, base + "|BUY");
-   else      ok = trade.Sell(vol, sym, 0.0, sl, tp, base + "|SELL");
-
-   // 7) Post-send bookkeeping
-   if(ok)
-   {
-      // Update daily risk state (cooldown + trades_today)
-      Risk_OnTradePlaced(g_risk, TimeCurrent());
-      g_diag.trades++;
-   }
-   else
-   {
-      g_diag.block_orderfail++;
-   }
-
-   return ok;
 }
 
 //+------------------------------------------------------------------+
@@ -195,12 +124,15 @@ int OnInit()
    // Visual label on chart (helps users identify EA + magic + version)
    ShowEaLabel(InpEaName, InpEaId, (int)InpMagic, _Symbol, (ENUM_TIMEFRAMES)_Period);
 
-   // Friendly warnings (preset expects a target, but user attached elsewhere)
-   if(StringLen(InpTargetPair) > 0 && _Symbol != InpTargetPair)
-      Print("Warning: Intended symbol=", InpTargetPair, ", attached chart symbol=", _Symbol);
-
-   if(_Period != InpTargetTf)
-      Print("Warning: Intended TF=", EnumToString(InpTargetTf), ", current chart TF=", EnumToString(_Period));
+   // Refuse to run on a chart that does not match the preset target. Without
+   // this the EA silently trades InpTargetPair while displaying a different
+   // instrument, and the mismatch was only a warning that scrolled past.
+   // INIT_PARAMETERS_INCORRECT, not INIT_FAILED: a chart mismatch is a wrong-input
+   // condition, so MT5 keeps the EA on the chart and re-opens the properties
+   // dialog. INIT_FAILED detaches the EA outright, which leaves nothing to press
+   // F7 on and forces a full re-attach just to correct a single field.
+   if(!ChartMatchesTarget(InpTargetPair, InpTargetTf, InpStrictChartMatch))
+      return INIT_PARAMETERS_INCORRECT;
 
    // Create and validate indicator handles (retry + history preload inside helper)
    TrendIndicators_Reset(g_ind);
@@ -217,7 +149,7 @@ int OnInit()
    }
 
    // Initialize daily risk state (resets internal counters / daily snapshot)
-   Risk_Init(g_risk, TimeCurrent());
+   Risk_Init(g_risk, TradingDayNow());   // seed risk day on the unified UTC trading-day clock
 
    // Set last closed bar time so we do not "burst" trade on start
    g_lastClosedBarTime = (datetime)iTime(g_symbol, InpTargetTf, 1);
@@ -227,6 +159,10 @@ int OnInit()
    // Configure CTrade once
    trade.SetExpertMagicNumber((int)InpMagic);
    trade.SetDeviationInPoints((int)InpDeviationPoints);
+
+   // Heartbeat: drive OnTick from a timer too, so position management does not
+   // depend on this chart's tick flow (see KurosawaHelpers.mqh).
+   EventSetTimer(KUROSAWA_ENGINE_TIMER_SEC);
 
    return INIT_SUCCEEDED;
 }
@@ -240,6 +176,8 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+   EventKillTimer();
+
    // Print the current (partial) day snapshot before exit
    PrintDailySummary(InpEaName, g_symbol, InpTargetTf, g_diag);
 
@@ -267,6 +205,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       InpEaId,
       InpEaName,
       InpEaVersion,
+      InpPresetVersion,
 
       (int)InpMagic,
       InpTrackSendOpen,
@@ -297,10 +236,10 @@ void OnTick()
    const datetime now = TimeCurrent();
 
    // A) Daily reporting roll (prints prior day summary once per day)
-   DailyRollIfNeeded(InpEaName, sym, InpTargetTf, g_diag, NowYmdJst());
+   DailyRollIfNeeded(InpEaName, sym, InpTargetTf, g_diag, TradingDayYmd());
 
    // B) Risk reset (optionally resets streak on a new day)
-   DailyResetIfNewDay(g_risk, now, g_consecLosses, InpResetConsecLossDaily);
+   DailyResetIfNewDay(g_risk, TradingDayNow(), g_consecLosses, InpResetConsecLossDaily);
 
    // ----------------------------------------------------------------
    // 1) If we already have a position, do position management only.
@@ -308,6 +247,13 @@ void OnTick()
    // ----------------------------------------------------------------
    if(PositionExists(sym, (int)InpMagic))
    {
+      // Sample MFE/MAE for the open position. Self-gates on a new bar, so it is
+      // safe to call every tick. This must live HERE: Track_OnNewBar returns
+      // immediately when no position exists, and the old call site sat below
+      // the flat-state gates, so it only ever ran while FLAT - dead code, which
+      // is why every closed-trade row had mfe/mae/bars_held at zero.
+      Track_OnNewBar(InpTrackEnable, (int)InpMagic, sym, InpTargetTf);
+
       // Time-stop: close if held too long
       if(InpMaxHoldMinutes > 0)
       {
@@ -339,49 +285,28 @@ void OnTick()
    }
 
    // ----------------------------------------------------------------
-   // 2) Safety gates (only when flat)
-   //    These prevent trading during bad conditions.
+   // 2) Safety gates (only when flat) — shared logic in Gates_CheckFlat.
+   //    Engine just maps the failing reason to its own diag counter.
    // ----------------------------------------------------------------
-
-   // Session window gate
-   if(!IsTimeWindowByOffsetHours(InpStartHour, InpEndHour, InpUtcOffset))
+   const GateResult gate = Gates_CheckFlat(
+      sym, g_risk, g_consecLosses,
+      InpStartHour, InpEndHour, InpUtcOffset,
+      InpMaxSpreadPoints, InpCooldownMinutes,
+      InpDailyLossLimitPercent, InpMaxConsecLosses, InpMaxTradesPerDay,
+      now
+   );
+   if(gate != GATE_OK)
    {
-      g_diag.block_session++;
-      return;
-   }
-
-   // Spread gate (avoid wide spread conditions)
-   if(!SpreadOK(sym, InpMaxSpreadPoints))
-   {
-      g_diag.block_spread++;
-      return;
-   }
-
-   // Cooldown gate (avoid rapid-fire re-entry)
-   if(!CooldownOK(g_risk, InpCooldownMinutes, now))
-   {
-      g_diag.block_cooldown++;
-      return;
-   }
-
-   // Daily loss limit gate (capital protection)
-   if(!DailyLossLimitOK(g_risk, InpDailyLossLimitPercent))
-   {
-      g_diag.block_maxday++;
-      return;
-   }
-
-   // Loss streak gate (avoid continuing in a bad regime)
-   if(!LossStreakOK(g_consecLosses, InpMaxConsecLosses))
-   {
-      g_diag.block_loss++;
-      return;
-   }
-
-   // Max trades per day gate
-   if(InpMaxTradesPerDay > 0 && g_risk.trades_today >= InpMaxTradesPerDay)
-   {
-      g_diag.block_maxtrades++;
+      switch(gate)
+      {
+         case GATE_BLOCK_SESSION:   g_diag.block_session++;   break;
+         case GATE_BLOCK_SPREAD:    g_diag.block_spread++;    break;
+         case GATE_BLOCK_COOLDOWN:  g_diag.block_cooldown++;  break;
+         case GATE_BLOCK_MAXDAY:    g_diag.block_maxday++;    break;
+         case GATE_BLOCK_LOSS:      g_diag.block_loss++;      break;
+         case GATE_BLOCK_MAXTRADES: g_diag.block_maxtrades++; break;
+         default: break;
+      }
       return;
    }
 
@@ -392,7 +317,6 @@ void OnTick()
    if(!IsNewClosedBar(sym, InpTargetTf, g_lastClosedBarTime))
       return;
 
-   Track_OnNewBar(InpTrackEnable, (int)InpMagic, sym, InpTargetTf);
    g_diag.bars++;
 
    // ----------------------------------------------------------------
@@ -410,7 +334,8 @@ void OnTick()
    inps.adx_min_to_trade  = InpMinAdxToTrade;
    inps.adx_max_to_trade  = InpMaxAdxToTrade;
 
-   inps.require_ema_slope = InpRequireEmaSlope;
+   inps.require_ema_slope   = InpRequireEmaSlope;
+   inps.require_rsi_reclaim = InpRequireReclaim;
 
    TrendSignal sig;
 
@@ -472,4 +397,16 @@ void OnTick()
    // ----------------------------------------------------------------
    if(sig.buy)  PlaceTrade(sym, true,  slPts, tpPts);
    else         PlaceTrade(sym, false, slPts, tpPts);
+}
+
+//+------------------------------------------------------------------+
+//| OnTimer                                                          |
+//|                                                                  |
+//| Same body as OnTick. MT5 serializes EA events on one thread, so  |
+//| this cannot run concurrently with OnTick, and the once-per-closed |
+//| -bar guard keeps entries from firing twice.                      |
+//+------------------------------------------------------------------+
+void OnTimer()
+{
+   OnTick();
 }

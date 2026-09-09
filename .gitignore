@@ -1,0 +1,10 @@
+# The ingest API key is the only secret in this repository.
+# Copy Helpers/KurosawaSecrets.example.mqh -> Helpers/KurosawaSecrets.mqh and paste your key there.
+**/KurosawaSecrets.mqh
+
+# Compiled binaries, editor backups, logs
+*.ex5
+*.bak
+*.log
+Thumbs.db
+.DS_Store

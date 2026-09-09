@@ -177,83 +177,24 @@ bool _TPB_EnsureIndicatorsCalculated()
 //+------------------------------------------------------------------+
 bool PlaceTrade(const string sym, const bool isBuy, const double slPts, const double tpPts)
 {
-   if(slPts <= 0.0 || tpPts <= 0.0)
-      return false;
+   // Thin wrapper over the shared executor (Helpers/KurosawaExecutor.mqh):
+   // sizing, POINTS->price SL/TP, broker stops, filling mode, send-retry.
+   ExecConfig cfg;
+   cfg.magic           = (ulong)InpMagic;
+   cfg.eaName          = InpEaName;
+   cfg.eaVersion       = InpEaVersion;
+   cfg.deviationPoints = (int)InpDeviationPoints;
+   cfg.useRiskSizing   = InpUseRiskSizing;
+   cfg.riskPercent     = InpRiskPercent;
+   cfg.fixedLot        = InpFixedLot;
+   cfg.maxLotCap       = InpMaxLotCap;
+   cfg.requireTp       = true;   // TrendPullback places a fixed TP
+   cfg.maxSendRetries  = 2;
 
-   // 1) Size
-   const double vol = Risk_CalcTradeVolume(
-      sym,
-      slPts,
-      InpUseRiskSizing,
-      InpRiskPercent,
-      InpFixedLot,
-      InpMaxLotCap
+   return Exec_PlaceTrade(
+      trade, sym, isBuy, slPts, tpPts, cfg, g_risk,
+      g_diag.trades, g_diag.block_orderfail, g_diag.block_indfail, g_diag.block_stops
    );
-
-   if(vol <= 0.0)
-   {
-      g_diag.block_orderfail++;
-      return false;
-   }
-
-   // 2) Quote -> entry
-   const double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
-   const double bid = SymbolInfoDouble(sym, SYMBOL_BID);
-   if(ask <= 0.0 || bid <= 0.0)
-   {
-      g_diag.block_indfail++;
-      return false;
-   }
-
-   const double entry = isBuy ? ask : bid;
-
-   // 3) Points -> price
-   const double pt = SymbolInfoDouble(sym, SYMBOL_POINT);
-   if(pt <= 0.0)
-   {
-      g_diag.block_indfail++;
-      return false;
-   }
-
-   double sl = 0.0, tp = 0.0;
-
-   if(isBuy)
-   {
-      sl = entry - slPts * pt;
-      tp = entry + tpPts * pt;
-   }
-   else
-   {
-      sl = entry + slPts * pt;
-      tp = entry - tpPts * pt;
-   }
-
-   // 4) Broker constraints
-   if(!EnsureStopsLevel(sym, entry, sl, tp, isBuy, true))
-   {
-      g_diag.block_stops++;
-      return false;
-   }
-
-   // 5) Send
-   trade.SetExpertMagicNumber((int)InpMagic);
-   trade.SetDeviationInPoints((int)InpDeviationPoints);
-
-   const string base = InpEaName + "|" + InpEaVersion;
-
-   bool ok = false;
-   if(isBuy) ok = trade.Buy(vol, sym, 0.0, sl, tp, base + "|BUY");
-   else      ok = trade.Sell(vol, sym, 0.0, sl, tp, base + "|SELL");
-
-   if(ok)
-   {
-      Risk_OnTradePlaced(g_risk, TimeCurrent());
-      g_diag.trades++;
-      return true;
-   }
-
-   g_diag.block_orderfail++;
-   return false;
 }
 
 // ==================================================================
@@ -267,12 +208,15 @@ int OnInit()
    // Chart label for humans
    ShowEaLabel(InpEaName, InpEaId, (int)InpMagic, _Symbol, (ENUM_TIMEFRAMES)_Period);
 
-   // Warn-only intent checks
-   if(StringLen(InpTargetPair) > 0 && _Symbol != InpTargetPair)
-      Print("Warning: Intended symbol=", InpTargetPair, ", attached chart symbol=", _Symbol);
-
-   if(_Period != InpTargetTf)
-      Print("Warning: Intended TF=", EnumToString(InpTargetTf), ", current chart TF=", EnumToString(_Period));
+   // Refuse to run on a chart that does not match the preset target. Without
+   // this the EA silently trades InpTargetPair while displaying a different
+   // instrument, and the mismatch was only a warning that scrolled past.
+   // INIT_PARAMETERS_INCORRECT, not INIT_FAILED: a chart mismatch is a wrong-input
+   // condition, so MT5 keeps the EA on the chart and re-opens the properties
+   // dialog. INIT_FAILED detaches the EA outright, which leaves nothing to press
+   // F7 on and forces a full re-attach just to correct a single field.
+   if(!ChartMatchesTarget(InpTargetPair, InpTargetTf, InpStrictChartMatch))
+      return INIT_PARAMETERS_INCORRECT;
 
    // Create indicator handles (bias TF + entry TF)
    _TPB_Indicators_Reset();
@@ -286,7 +230,7 @@ int OnInit()
    }
 
    // Init risk state
-   Risk_Init(g_risk, TimeCurrent());
+   Risk_Init(g_risk, TradingDayNow());   // seed risk day on the unified UTC trading-day clock
 
    // Prime last closed bar time (entry TF)
    g_lastClosedBarTime = (datetime)iTime(g_symbol, InpTargetTf, 1);
@@ -295,11 +239,17 @@ int OnInit()
    trade.SetExpertMagicNumber((int)InpMagic);
    trade.SetDeviationInPoints((int)InpDeviationPoints);
 
+   // Heartbeat: drive OnTick from a timer too, so position management does not
+   // depend on this chart's tick flow (see KurosawaHelpers.mqh).
+   EventSetTimer(KUROSAWA_ENGINE_TIMER_SEC);
+
    return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
+   EventKillTimer();
+
    PrintDailySummary(InpEaName, g_symbol, InpTargetTf, g_diag);
    _TPB_Indicators_Release();
 }
@@ -315,6 +265,7 @@ void OnTradeTransaction(const MqlTradeTransaction &trans,
       InpEaId,
       InpEaName,
       InpEaVersion,
+      InpPresetVersion,
 
       (int)InpMagic,
       InpTrackSendOpen,
@@ -334,8 +285,8 @@ void OnTick()
    const string   sym = g_symbol;
    const datetime now = TimeCurrent();
 
-   DailyRollIfNeeded(InpEaName, sym, InpTargetTf, g_diag, NowYmdJst());
-   DailyResetIfNewDay(g_risk, now, g_consecLosses, InpResetConsecLossDaily);
+   DailyRollIfNeeded(InpEaName, sym, InpTargetTf, g_diag, TradingDayYmd());
+   DailyResetIfNewDay(g_risk, TradingDayNow(), g_consecLosses, InpResetConsecLossDaily);
 
    // ------------------------------------------------------------
    // 1) Position management (one position per symbol+magic)
@@ -343,6 +294,13 @@ void OnTick()
    if(PositionExists(sym, (int)InpMagic))
    {
       g_diag.block_haspos++;
+
+      // Sample MFE/MAE for the open position. Self-gates on a new bar, so it is
+      // safe to call every tick. This must live HERE: Track_OnNewBar returns
+      // immediately when no position exists, and the old call site sat below
+      // the flat-state gates, so it only ever ran while FLAT - dead code, which
+      // is why every closed-trade row had mfe/mae/bars_held at zero.
+      Track_OnNewBar(InpTrackEnable, (int)InpMagic, sym, InpTargetTf);
 
       // Optional time-stop exit
       if(InpMaxHoldMinutes > 0)
@@ -361,39 +319,25 @@ void OnTick()
    // ------------------------------------------------------------
    // 2) Safety gates (only when flat)
    // ------------------------------------------------------------
-   if(!IsTimeWindowByOffsetHours(InpStartHour, InpEndHour, InpUtcOffset))
+   const GateResult gate = Gates_CheckFlat(
+      sym, g_risk, g_consecLosses,
+      InpStartHour, InpEndHour, InpUtcOffset,
+      InpMaxSpreadPoints, InpCooldownMinutes,
+      InpDailyLossLimitPercent, InpMaxConsecLosses, InpMaxTradesPerDay,
+      now
+   );
+   if(gate != GATE_OK)
    {
-      g_diag.block_session++;
-      return;
-   }
-
-   if(!SpreadOK(sym, InpMaxSpreadPoints))
-   {
-      g_diag.block_spread++;
-      return;
-   }
-
-   if(!CooldownOK(g_risk, InpCooldownMinutes, now))
-   {
-      g_diag.block_cooldown++;
-      return;
-   }
-
-   if(!DailyLossLimitOK(g_risk, InpDailyLossLimitPercent))
-   {
-      g_diag.block_maxday++;
-      return;
-   }
-
-   if(!LossStreakOK(g_consecLosses, InpMaxConsecLosses))
-   {
-      g_diag.block_loss++;
-      return;
-   }
-
-   if(InpMaxTradesPerDay > 0 && g_risk.trades_today >= InpMaxTradesPerDay)
-   {
-      g_diag.block_maxtrades++;
+      switch(gate)
+      {
+         case GATE_BLOCK_SESSION:   g_diag.block_session++;   break;
+         case GATE_BLOCK_SPREAD:    g_diag.block_spread++;    break;
+         case GATE_BLOCK_COOLDOWN:  g_diag.block_cooldown++;  break;
+         case GATE_BLOCK_MAXDAY:    g_diag.block_maxday++;    break;
+         case GATE_BLOCK_LOSS:      g_diag.block_loss++;      break;
+         case GATE_BLOCK_MAXTRADES: g_diag.block_maxtrades++; break;
+         default: break;
+      }
       return;
    }
 
@@ -409,7 +353,6 @@ void OnTick()
    if(!IsNewClosedBar(sym, InpTargetTf, g_lastClosedBarTime))
       return;
 
-   Track_OnNewBar(InpTrackEnable, (int)InpMagic, sym, InpTargetTf);
    g_diag.bars++;
 
    // ------------------------------------------------------------
@@ -479,5 +422,17 @@ void OnTick()
    // ------------------------------------------------------------
    if(sig.buy)  PlaceTrade(sym, true,  slPts, tpPts);
    else         PlaceTrade(sym, false, slPts, tpPts);
+}
+
+//+------------------------------------------------------------------+
+//| OnTimer                                                          |
+//|                                                                  |
+//| Same body as OnTick. MT5 serializes EA events on one thread, so  |
+//| this cannot run concurrently with OnTick, and the once-per-closed |
+//| -bar guard keeps entries from firing twice.                      |
+//+------------------------------------------------------------------+
+void OnTimer()
+{
+   OnTick();
 }
 //+------------------------------------------------------------------+

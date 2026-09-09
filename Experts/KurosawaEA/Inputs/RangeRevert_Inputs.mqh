@@ -1,151 +1,204 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| File: Inputs/RangeRevert_Inputs.mqh                              |
-//| Ver : 0.3.1                                                      |
+//| Ver : 0.4.2                                                      |
 //|                                                                  |
 //| Purpose                                                          |
-//| Centralized input parameters for a generic Range Reversion EA.   |
-//| This file defines INPUTS ONLY (no logic, no state).              |
+//| Inputs-only file for the Kurosawa EA suite (Excel-aligned).      |
 //|                                                                  |
-//| Design notes                                                     |
-//| - Strategy-agnostic naming where possible                        |
-//| - Excel / .set compatibility preserved                           |
-//| - Session, regime, entry, exit, and risk knobs exposed           |
+//| Units & conventions                                              |
+//| - ALL distance-based values are in POINTS                        |
+//| - POINTS are in _Point units for the current symbol              |
 //|                                                                  |
-//| Strategy summary                                                 |
-//| - Mean-reversion in quiet / range-bound regimes                  |
-//| - Entry: BB edge touch + RSI extreme (closed bar)                |
-//| - Exit: BB mid-band and/or time stop                             |
-//| - Risk: ATR-based SL with R-multiple TP                          |
+//| Notes                                                            |
+//| - This file defines ONLY inputs (no logic).                      |
+//| - Keep column names consistent across the suite.                 |
+//| - RangeRevert uses BB/RSI/ADX/ATR + ATR-based stops.             |
 //+------------------------------------------------------------------+
 #property strict
 
 #ifndef KUROSAWA_RANGEREVERT_INPUTS_MQH
 #define KUROSAWA_RANGEREVERT_INPUTS_MQH
 
-//==================================================================
+// ==================================================================
 // Identity / Meta
-//==================================================================
-input string InpTradeSession      = "London";   // semantic label only
-input string InpEaName            = "RangeRevert";
-input int    InpMagic             = 2026011704;
-input string InpEaId              = "ea-rangerevert-generic";
-input string InpEaVersion         = "0.3.1";
+// Columns: InpZone, InpEaName, InpMagic, InpEaId, InpEaVersion
+// ==================================================================
+input string InpZone      = "London";
+input string InpEaName    = "London_RangeRevert_USDJPY_M5";
+// Magic must be unique per RUNNING INSTANCE - see the registry in
+// Helpers/KurosawaHelpers.mqh. Two EAs sharing a magic on one symbol will
+// enumerate and close each other's positions.
+input int    InpMagic     = 2026090302;
+input string InpEaId      = "ea-london-rangerevert-usdjpy-m5";
+// 0.5.1 = engine clock -> broker server time (2026-09-09); tester-identical to 0.5.0
+input string InpEaVersion = "0.5.1";
+// The TUNE version - one set of parameter values. Bumped on ANY parameter
+// change. Distinct from InpEaVersion above, which is the ENGINE build.
+// Presets and backtests on 1kpips.com key on this field, not on InpEaVersion.
+input string InpPresetVersion = "0.1.0";
 
-//==================================================================
-// Target (intent only, engine warns if mismatched)
-//==================================================================
-input string          InpTargetPair = "";
+// ==================================================================
+// Target (intent only; engine warns if mismatched)
+// Columns: InpTargetPair, InpTargetTf
+// ==================================================================
+input string          InpTargetPair = "USDJPY";
 input ENUM_TIMEFRAMES InpTargetTf   = PERIOD_M5;
+// ==================================================================
+// Safety: refuse to run on a chart that does not match the target
+// Columns: InpStrictChartMatch
+// ==================================================================
+input bool InpStrictChartMatch = true;
 
-//==================================================================
-// Tracking / Telemetry
-//==================================================================
-input bool   InpTrackEnable       = true;
-input bool   InpTrackSendOpen     = true;
 
-//==================================================================
-// Session window (local time via UTC offset)
-//==================================================================
-input int    InpStartHour         = 16;
-input int    InpEndHour           = 1;     // midnight crossing supported
-input int    InpUtcOffset         = 9;
+// ==================================================================
+// Tracking
+// Columns: InpTrackEnable, InpTrackSendOpen
+// ==================================================================
+input bool InpTrackEnable   = true;
+input bool InpTrackSendOpen = true;
 
-//==================================================================
-// EMA placeholders (not used by RangeRevert)
-//==================================================================
-input int    InpEmaFast           = 0;
-input int    InpEmaSlow           = 0;
-input bool   InpUseDirFilter      = false;
-input int    InpEmaDir            = 0;
+// ==================================================================
+// Session (local time via fixed UTC offset; midnight-crossing supported)
+// Columns: InpStartHour, InpEndHour, InpUtcOffset
+// ==================================================================
+input int InpStartHour = 16;
+input int InpEndHour   = 1;
+input int InpUtcOffset = 9;
 
-//==================================================================
-// Bollinger Bands (USED)
-//==================================================================
+// ==================================================================
+// EMA trend bias placeholders (schema-aligned; not used by RangeRevert)
+// Columns: InpEmaFast, InpEmaSlow, InpUseDirFilter, InpEmaDir
+// ==================================================================
+input int  InpEmaFast      = 0;
+input int  InpEmaSlow      = 0;
+input bool InpUseDirFilter = false;
+input int  InpEmaDir       = 0;
+
+// ==================================================================
+// Min-move/Bollinger schema fields
+// Columns: InpUseMinMoveFilter, InpBbPeriod, InpMinMoveSpreadMult, InpBbDev
+// Note: RangeRevert uses BB, but does not use the min-move filter.
+// ==================================================================
+input bool   InpUseMinMoveFilter  = false;
 input int    InpBbPeriod          = 20;
+input double InpMinMoveSpreadMult = 0.0;
 input double InpBbDev             = 2.0;
 
-//==================================================================
-// Min-move placeholders (not used here, schema-aligned)
-//==================================================================
-input bool   InpUseMinMoveFilter  = false;
-input double InpMinMoveSpreadMult = 0.0;
+// ==================================================================
+// RSI
+// Columns: InpUseRsiCrossConfirm, InpRsiBuyCrossLevel, InpRsiSellCrossLevel,
+//          InpRsiPeriod, InpRsiBuyBelow, InpRsiSellAbove
+// Note: RangeRevert uses threshold confirmation, not cross-confirm.
+// ==================================================================
+input bool   InpUseRsiCrossConfirm = false;
+input double InpRsiBuyCrossLevel   = 0.0;
+input double InpRsiSellCrossLevel  = 0.0;
 
-//==================================================================
-// RSI (USED)
-// Buy when RSI <= BuyBelow
-// Sell when RSI >= SellAbove
-//==================================================================
-input int    InpRsiPeriod         = 14;
-input double InpRsiBuyBelow       = 35.0;
-input double InpRsiSellAbove      = 65.0;
+input int    InpRsiPeriod    = 14;
+input double InpRsiBuyBelow  = 30.0;
+input double InpRsiSellAbove = 70.0;
 
-//==================================================================
-// Wick / edge placeholders (not used)
-//==================================================================
-input bool   InpUseWickSignal     = false;
-input double InpMinBandBreakPoints  = 0.0;
-input double InpMinEdgeOverSpread = 0.0;
+// ==================================================================
+// Wick / Edge quality (optional, POINTS + multiplier)
+// Columns: InpUseWickSignal, InpMinBandBreakPips, InpMinEdgeOverSpread
+//
+// Important:
+// - Suite standard is POINTS, so we store the value in POINTS.
+// - We keep the schema name "InpMinBandBreakPips" for compatibility,
+//   but the unit is POINTS in this suite.
+// - RangeRevert currently uses InpMinBandBreakPips (as POINTS) and
+//   InpMinEdgeOverSpread. InpUseWickSignal is a schema flag.
+// ==================================================================
+input bool   InpUseWickSignal      = false;
+input double InpMinBandBreakPoints  = 0.0;   
+input double InpMinEdgeOverSpread  = 0.0;  
 
-//==================================================================
-// ADX regime filter (USED)
-// Quiet market gate: ADX must be <= Max
-//==================================================================
-input bool   InpUseAdxFilter      = true;
-input int    InpAdxPeriod         = 14;
-input double InpMinAdxToTrade     = 0.0;   // unused, keep 0
-input double InpMaxAdxToTrade     = 22.0;
+// Convenience alias (engine/strategy can use this name if you prefer)
+input int    InpDeviationPoints    = 20;
 
-//==================================================================
-// ATR regime filter (USED)
-// NOTE: Values are treated as POINTS by the engine.
-// Naming kept for Excel compatibility.
-//==================================================================
-input int    InpAtrPeriod         = 14;
-input double InpAtrMinPoints       = 1.8;
-input double InpAtrMaxPoints        = 6.0;
 
-//==================================================================
-// Fixed SL / TP placeholders (not used)
-//==================================================================
-input double InpSlPips            = 0.0;
-input double InpTpPips            = 0.0;
+// ==================================================================
+// ADX regime filter
+// Columns: InpUseAdxFilter, InpAdxPeriod, InpMinAdxToTrade, InpMaxAdxToTrade
+//
+// Note:
+// - RangeRevert uses the MAX gate (avoid trend): trade only if ADX <= max.
+// - InpMinAdxToTrade kept as schema placeholder.
+// ==================================================================
+input bool   InpUseAdxFilter   = true;
+input int    InpAdxPeriod      = 14;
+input double InpMinAdxToTrade  = 0.0;
+input double InpMaxAdxToTrade  = 22.0;
 
-//==================================================================
-// Risk sizing / volume
-//==================================================================
-input bool   InpUseRiskSizing     = true;
-input double InpRiskPercent       = 0.30;
-input double InpFixedLot          = 0.05;
-input double InpMaxLotCap         = 0.0;
+// ==================================================================
+// ATR window (POINTS)
+// Columns: InpAtrPeriod, InpAtrMinPips   (schema), but suite uses InpAtrMinPips name
+//
+// Your suite standard list uses: InpAtrPeriod, InpAtrMinPips
+// However your engines have been using InpAtrMinPoints/InpAtrMaxPoints.
+// To stay aligned across your suite, keep the existing names you already
+// use in code: InpAtrMinPoints / InpAtrMaxPoints.
+// ==================================================================
+input int    InpAtrPeriod    = 14;
+input double InpAtrMinPoints = 50.0;   
+input double InpAtrMaxPoints = 300.0;  
 
-//==================================================================
-// Frequency & safety guards
-//==================================================================
-input int    InpMaxTradesPerDay      = 0;
-input double InpMaxSpreadPoints      = 22.0;
-input int    InpMaxConsecLosses      = 3;
-input bool   InpResetConsecLossDaily = false;
+// ==================================================================
+// Fixed SL/TP (POINTS) (schema placeholder; not used by RangeRevert)
+// Columns: InpSlPips, InpTpPips  (suite list) but engines use Points.
+// Keep as Points for consistency with your engines.
+// ==================================================================
+input double InpSlPoints = 0.0;
+input double InpTpPoints = 0.0;
+
+// ==================================================================
+// Risk sizing
+// Columns: InpUseRiskSizing, InpRiskPercent, InpFixedLot, InpMaxLotCap
+// ==================================================================
+input bool   InpUseRiskSizing = true;
+input double InpRiskPercent   = 0.30;
+input double InpFixedLot      = 0.05;
+input double InpMaxLotCap     = 0.0;
+
+// ==================================================================
+// Frequency & Safety Guards
+// Columns: InpMaxTradesPerDay, InpMaxSpreadPoints, InpMaxConsecLosses,
+//          InpResetConsecLossDaily, InpDailyLossLimitPercent,
+//          InpCooldownMinutes, InpMaxHoldMinutes
+// ==================================================================
+input int    InpMaxTradesPerDay       = 10;
+input int    InpMaxSpreadPoints       = 30;
+
+input int    InpMaxConsecLosses       = 3;
+// Must stay true: consecLosses only resets on a win, so with this false the EA
+// halts permanently after N losses - it cannot win because it cannot trade.
+input bool   InpResetConsecLossDaily  = true;
 
 input double InpDailyLossLimitPercent = 2.0;
 input int    InpCooldownMinutes       = 20;
 input int    InpMaxHoldMinutes        = 240;
 
-//==================================================================
-// Exit logic
-//==================================================================
+// ==================================================================
+// Exit Options / Trailing (schema-aligned)
+// Columns: InpUseMidBandExit, InpUseTrailing, InpTrailStartR, InpTrailStepAtrMult
+// ==================================================================
 input bool   InpUseMidBandExit   = true;
 
-// Trailing placeholders
 input bool   InpUseTrailing      = false;
 input double InpTrailStartR      = 0.0;
 input double InpTrailStepAtrMult = 0.0;
 
-//==================================================================
-// ATR-based stop model (USED)
-// SL = ATR * InpSlAtrMult
-// TP = SL * InpTpRMultiple
-//==================================================================
-input double InpSlAtrMult        = 2.2;
-input double InpTpRMultiple      = 1.0;
+// ==================================================================
+// ATR-based stop model
+// Columns: InpSlAtrMult, InpTpRMultiple
+// ==================================================================
+input double InpSlAtrMult   = 2.2;
+input double InpTpRMultiple = 1.0;
+
+// ==================================================================
+// Strategy-specific (schema-aligned field)
+// Columns: InpRequireReclaim
+// ==================================================================
+input bool InpRequireReclaim = false;
 
 #endif // KUROSAWA_RANGEREVERT_INPUTS_MQH

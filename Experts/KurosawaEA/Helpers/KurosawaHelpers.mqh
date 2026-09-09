@@ -70,6 +70,73 @@
 // 5) Indicator handle factory / packs (self-contained; optional)
 #include "KurosawaIndicatorFactory.mqh"
 
+// 6) Shared order executor + safety gate (composes Time + Exec + Risk)
+//    - Exec_PlaceTrade(): one order path for all engines (sizing, SL/TP,
+//      broker stops, filling mode, transient send-retry).
+//    - Gates_CheckFlat(): one flat-state safety-gate check for all engines.
+#include "KurosawaExecutor.mqh"
+
+// ------------------------------------------------------------------
+// Magic number registry
+// ------------------------------------------------------------------
+// A magic identifies ONE RUNNING INSTANCE, not one strategy. Every engine
+// finds, modifies and closes positions by (symbol, magic), so two EAs sharing a
+// magic on the same symbol will manage each other's trades: one's exit closes
+// the other's entry. This is silent - nothing errors, the trades just behave
+// inexplicably.
+//
+// Assigned 2026-09-03. Format yyyymmdd + a 2-digit slot.
+//
+//   2026090301   TrendEA           EURUSD M15
+//   2026090302   RangeRevertEA     USDJPY M5
+//   2026090303   TrendPullbackEA   EURUSD M5
+//   2026090304   RangeRevertEA     EURUSD M1   (preset variant)
+//
+// Assigned 2026-09-04 (preset .set files only, no engine default):
+//   2026090401   RangeRevertEA     EURUSD M15  (London_RangeRevert_EURUSD_M15.set)
+//   2026090402   RangeRevertEA     any    M15  (RangeRevert_Multi_M15.set, screening)
+//
+// Assigned 2026-09-07, multi-pair screening sets (InpTargetPair empty):
+//   2026090701   RangeRevertEA     any    M5   (RangeRevert_Multi_M5.set)
+//   2026090702   TrendPullbackEA   any    M5   (TrendPullback_Multi_M5.set)
+//   2026090703   TrendPullbackEA   any    M15  (TrendPullback_Multi_M15.set)
+//   2026090704   TrendEA           any    M15  (Trend_Multi_M15.set)
+//   2026090705   TrendEA           any    H1   (Trend_Multi_H1.set)
+// Assigned 2026-09-09, per-pair RangeRevert presets (proven-track candidates):
+//   2026090901   RangeRevertEA     GBPUSD M15  (London_RangeRevert_GBPUSD_M15.set)
+//   2026090902   RangeRevertEA     USDJPY M15  (London_RangeRevert_USDJPY_M15.set)
+//   2026090903   RangeRevertEA     EURJPY M15  (London_RangeRevert_EURJPY_M15.set)
+//   2026090904   RangeRevertEA     GBPJPY M15  (London_RangeRevert_GBPJPY_M15.set)
+// Assigned 2026-09-09, New York session instances (run beside the London ones):
+//   2026090905   RangeRevertEA     EURUSD M15  (NewYork_RangeRevert_EURUSD_M15.set)
+//   2026090906   RangeRevertEA     USDJPY M15  (NewYork_RangeRevert_USDJPY_M15.set)
+//   2026090907   RangeRevertEA     EURJPY M15  (NewYork_RangeRevert_EURJPY_M15.set)
+// Assigned 2026-09-09, Tokyo session instances (JPY pairs):
+//   2026090908   RangeRevertEA     USDJPY M15  (Tokyo_RangeRevert_USDJPY_M15.set)
+//   2026090909   RangeRevertEA     EURJPY M15  (Tokyo_RangeRevert_EURJPY_M15.set)
+//   2026090910   RangeRevertEA     GBPJPY M15  (Tokyo_RangeRevert_GBPJPY_M15.set)
+//   2026090911   RangeRevertEA     any    M30  (RangeRevert_Multi_M30.set, timeframe probe)
+//
+// Take a NEW slot for every additional chart, including a second instance of
+// the same engine on a different pair. The retired 20260117xx / 20260210xx
+// numbers collided three ways across the engine defaults, the tester .set files
+// and the (non-compiling) presets - do not reuse them.
+// ------------------------------------------------------------------
+
+// ------------------------------------------------------------------
+// Engine heartbeat
+// ------------------------------------------------------------------
+// Engines do their work in OnTick, but tick flow is not a dependable clock:
+// - ResolveEngineSymbol() lets the traded symbol differ from the chart symbol,
+//   in which case OnTick fires on the CHART's ticks, not the traded
+//   instrument's - so the time-stop and the trailing stop would run on the
+//   wrong feed.
+// - A quiet market or a stalled chart subscription stops ticks altogether.
+// Position management must not depend on either, so every engine also drives
+// OnTick from a timer. The signal analyzers already do this; the engines, where
+// a missed exit actually costs money, did not.
+#define KUROSAWA_ENGINE_TIMER_SEC 5
+
 // ------------------------------------------------------------------
 // Chart UI: EA identity label
 // ------------------------------------------------------------------

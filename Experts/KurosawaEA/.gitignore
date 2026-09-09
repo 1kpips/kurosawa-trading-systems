@@ -1,0 +1,4 @@
+# The real 1kpips ingest API key lives in KurosawaSecrets.mqh and must NEVER be committed.
+# Copy KurosawaSecrets.example.mqh -> KurosawaSecrets.mqh and paste the key locally.
+KurosawaSecrets.mqh
+*.ex5

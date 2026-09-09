@@ -183,6 +183,9 @@ double Risk_MinLot(const string symbol)
    return vmin;
 }
 
+// Lenient normalize (used for an EXPLICIT fixed lot): floor to the step grid within
+// [vmin, vmax], and raise a sub-minimum lot up to vmin. Returns 0 if broker volume
+// constraints cannot be read (reject rather than send an unvalidated lot).
 double Risk_NormalizeVolume(const string symbol, const double vol)
 {
    const double vmin = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
@@ -190,12 +193,45 @@ double Risk_NormalizeVolume(const string symbol, const double vol)
    const double step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
 
    if(vmin <= 0.0 || vmax <= 0.0 || step <= 0.0)
-      return vol;
+      return 0.0; // cannot validate broker constraints -> reject
 
-   double v = MathMax(vmin, MathMin(vmax, vol));
-   v = MathFloor(v / step) * step;
+   if(vol <= 0.0) return 0.0;
 
-   if(v < vmin) v = vmin;
+   // Epsilon before flooring. In binary floating point 0.29 / 0.01 is
+   // 28.999999999999996, so a plain MathFloor drops a whole volume step: an
+   // explicit InpFixedLot of 0.29 would trade 0.28 forever. With step = 0.1 the
+   // same effect turns 0.3 into 0.2, a 33% sizing error.
+   const double steps = MathFloor(MathMin(vmax, vol) / step + 1e-8);
+   double v = NormalizeDouble(steps * step, 8);
+
+   if(v < vmin) v = vmin;   // an explicit fixed lot may be raised to the broker minimum
+   if(v > vmax) v = vmax;   // ...but never past the broker maximum
+   return v;
+}
+
+// Strict normalize (used for RISK-BASED sizing): floor to the step grid within
+// [vmin, vmax], but if the result is below the broker minimum, return 0 (REJECT).
+// This prevents silently oversizing a risk-based lot up to min-lot, which would make
+// realized risk exceed the configured risk %.
+double Risk_NormalizeVolumeStrict(const string symbol, const double vol)
+{
+   const double vmin = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
+   const double vmax = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
+   const double step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
+
+   if(vmin <= 0.0 || vmax <= 0.0 || step <= 0.0)
+      return 0.0; // cannot validate broker constraints -> reject
+
+   if(vol <= 0.0) return 0.0;
+
+   // Epsilon before flooring - see Risk_NormalizeVolume. Without it a risk-based
+   // lot is under-delivered by a full step, and on a broker where step == vmin a
+   // computed lot that should equal vmin floors to 0 and the trade is refused
+   // with nothing in the log to explain why.
+   const double steps = MathFloor(MathMin(vmax, vol) / step + 1e-8);
+   const double v = NormalizeDouble(steps * step, 8);
+
+   if(v < vmin) return 0.0;  // risk-based lot below broker min -> refuse (do NOT oversize)
    return v;
 }
 
@@ -245,22 +281,31 @@ double Risk_CalcTradeVolume(
    if(slPoints <= 0.0)
       return 0.0;
 
-   double vol = 0.0;
-
-   if(useRiskSizing && riskPercent > 0.0)
+   if(useRiskSizing)
    {
-      vol = CalcLotRawByRiskPoints(symbol, slPoints, riskPercent, maxLotCap);
-      if(vol > 0.0)
-         vol = Risk_NormalizeVolume(symbol, vol);
+      // Risk-based sizing is fail-safe: it never falls back to a fixed/min lot.
+      if(riskPercent <= 0.0)
+         return 0.0; // risk sizing requested but no risk% -> stand down
+
+      const double raw = CalcLotRawByRiskPoints(symbol, slPoints, riskPercent, maxLotCap);
+      if(raw <= 0.0)
+         return 0.0; // sizing data unavailable / calc failed -> stand down (no fixed fallback)
+
+      // Strict: returns 0.0 if the risk-based lot is below the broker minimum, so we
+      // never oversize. (maxLotCap was already applied inside CalcLotRawByRiskPoints.)
+      return Risk_NormalizeVolumeStrict(symbol, raw);
    }
 
-   if(vol <= 0.0 && fixedLot > 0.0)
-      vol = Risk_NormalizeVolume(symbol, fixedLot);
+   // Explicit fixed-lot mode.
+   if(fixedLot > 0.0)
+   {
+      double vol = Risk_NormalizeVolume(symbol, fixedLot);
+      if(maxLotCap > 0.0 && vol > maxLotCap)
+         vol = Risk_NormalizeVolume(symbol, maxLotCap); // honor the cap on the fixed-lot path too
+      return vol;
+   }
 
-   if(vol <= 0.0)
-      vol = Risk_MinLot(symbol);
-
-   return vol;
+   return 0.0; // nothing valid to size -> skip
 }
 
 #endif // KUROSAWA_RISK_MANAGER_MQH
