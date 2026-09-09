@@ -116,6 +116,12 @@
 //   2026090909   RangeRevertEA     EURJPY M15  (Tokyo_RangeRevert_EURJPY_M15.set)
 //   2026090910   RangeRevertEA     GBPJPY M15  (Tokyo_RangeRevert_GBPJPY_M15.set)
 //   2026090911   RangeRevertEA     any    M30  (RangeRevert_Multi_M30.set, timeframe probe)
+//   2026090912   TrendEA           any    M15  (Trend_Multi_M15_NY.set, session probe)
+//   2026090913   BreakoutEA        EURJPY M15  (engine default)
+//   2026090914   BreakoutEA        any    M15  (Breakout_Multi_M15.set, screening)
+//   2026090915   FadeEA            USDJPY D1   (engine default)
+//   2026090916   FadeEA            any    D1   (Fade_Multi_D1.set / Fade70_Multi_D1.set, screening)
+//   2026090917   RangeRevertEA     any    M15  (RangeRevert_Multi_M15_D1gate.set, D1-gate screening)
 //
 // Take a NEW slot for every additional chart, including a second instance of
 // the same engine on a different pair. The retired 20260117xx / 20260210xx

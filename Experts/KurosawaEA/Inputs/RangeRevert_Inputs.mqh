@@ -31,7 +31,8 @@ input string InpEaName    = "London_RangeRevert_USDJPY_M5";
 input int    InpMagic     = 2026090302;
 input string InpEaId      = "ea-london-rangerevert-usdjpy-m5";
 // 0.5.1 = engine clock -> broker server time (2026-09-09); tester-identical to 0.5.0
-input string InpEaVersion = "0.5.1";
+// 0.6.0 = direction switches + D1 reading gate (2026-09-09); identical to 0.5.1 with the gate off
+input string InpEaVersion = "0.6.0";
 // The TUNE version - one set of parameter values. Bumped on ANY parameter
 // change. Distinct from InpEaVersion above, which is the ENGINE build.
 // Presets and backtests on 1kpips.com key on this field, not on InpEaVersion.
@@ -202,3 +203,23 @@ input double InpTpRMultiple = 1.0;
 input bool InpRequireReclaim = false;
 
 #endif // KUROSAWA_RANGEREVERT_INPUTS_MQH
+
+// ------------------------------------------------------------------
+// Direction switches and the D1 reading gate (added 0.6.0, 2026-09-09)
+// ------------------------------------------------------------------
+// Columns: InpAllowLongs, InpAllowShorts, InpD1GateMode, InpD1MinStrength, InpD1Rule
+//
+// Shorts were worthless unconditionally (~790 across 8 pair-windows, net ~0)
+// and the proven presets switch them off. The D1 readings are contrarian
+// (forward-return study 2026-09-09): a strong LONG reading means the move is
+// extended. The gate lets a side trade only AGAINST such a reading:
+//   InpD1GateMode  0 off | 1 shorts need extended-UP | 2 longs need extended-DOWN | 3 both
+//   InpD1MinStrength  reading strength required (analyzer scale, 0-100)
+//   InpD1Rule      0 Breakout (20-bar range + ATR expansion) | 1 DailyTrend (EMA20/50 + ADX)
+// Defaults reproduce 0.5.1 exactly: both sides allowed, gate off.
+input bool InpAllowLongs     = true;
+input bool InpAllowShorts    = true;
+input int  InpD1GateMode     = 0;
+input int  InpD1MinStrength  = 70;
+input int  InpD1Rule         = 0;
+

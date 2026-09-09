@@ -15,7 +15,8 @@ reason each was rejected. A preset with no filed result has not been tested.
 |---|---|
 | `London/` | Per-pair presets for the 07:00–13:00 **broker server time** window (see below). The three marked `proven` on the site are running live at minimum lot. |
 | `NewYork/`, `Tokyo/` | The same values with only the session changed. All rejected — the reason is in the file header and on the site. Kept so the negative result stays visible. |
-| `Screening/` | `*_Multi_*` files have `InpTargetPair` empty and run unchanged across pairs (select the Expert first, then Load, then change only the Symbol). `*_opt_*` files are optimisation grids with the swept inputs flagged. |
+| `Daily/` | `FadeEA` (D1) presets: fade the Breakout analyzer's strong readings. Candidate, not proven — the sign replicated on two data sources, the size did not. |
+| `Screening/` | `*_Multi_*` files have `InpTargetPair` empty and run unchanged across pairs (select the Expert first, then Load, then change only the Symbol). `*_opt_*` files are optimisation grids with the swept inputs flagged. `*_D1gate*` files test the D1 readings as a side gate for RangeRevert — all three tiers rejected out of sample. |
 
 ## Naming
 

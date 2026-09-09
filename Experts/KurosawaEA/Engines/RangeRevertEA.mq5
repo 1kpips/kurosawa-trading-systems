@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| File: Engines/RangeRevertEA.mq5                                  |
 //| Type: Engine (MT5 events + execution)                            |
 //| Ver : 0.6.0                                                      |
@@ -33,6 +33,7 @@
 
 // Strategy module (signal generation only)
 #include "../Strategies/RangeRevert.mqh"
+#include "../Strategies/D1Reading.mqh"
 
 // Inputs (Excel-aligned schema for presets)
 #include "../Inputs/RangeRevert_Inputs.mqh"
@@ -44,6 +45,7 @@ CTrade trade;
 // Indicator handles (created in OnInit, released in OnDeinit)
 // ------------------------------------------------------------------
 int hAdx = INVALID_HANDLE;
+D1Handles hD1;                 // D1 reading gate (0.6.0); unused when InpD1GateMode == 0
 int hAtr = INVALID_HANDLE;
 int hRsi = INVALID_HANDLE;
 int hBb  = INVALID_HANDLE;
@@ -142,6 +144,23 @@ int OnInit()
       return INIT_FAILED;
    }
 
+   // D1 reading gate handles (only when the gate is on; the proven presets run with it off)
+   D1Handles_Reset(hD1);
+   if(InpD1GateMode != 0)
+   {
+      if(InpD1GateMode < 0 || InpD1GateMode > 3 || InpD1Rule < 0 || InpD1Rule > 1)
+      {
+         Print("INIT_PARAMETERS_INCORRECT: InpD1GateMode must be 0-3 and InpD1Rule 0-1 (got ", InpD1GateMode, "/", InpD1Rule, ")");
+         return INIT_PARAMETERS_INCORRECT;
+      }
+      EnsureHistory(g_symbol, PERIOD_D1, 120);
+      if(!D1Handles_Create(g_symbol, (D1Rule)InpD1Rule, hD1))
+      {
+         Print("INIT_FAILED: D1 reading handles not ready. sym=", g_symbol);
+         return INIT_FAILED;
+      }
+   }
+
    Risk_Init(g_risk, TradingDayNow());   // seed risk day on the unified UTC trading-day clock
 
    // Set last closed bar time so we do not "burst" trade on start
@@ -165,6 +184,7 @@ void OnDeinit(const int reason)
 
    PrintDailySummary(InpEaName, g_symbol, InpTargetTf, g_diag);
 
+   D1Handles_Release(hD1);
    if(hAdx != INVALID_HANDLE) IndicatorRelease(hAdx);
    if(hAtr != INVALID_HANDLE) IndicatorRelease(hAtr);
    if(hRsi != INVALID_HANDLE) IndicatorRelease(hRsi);
@@ -344,6 +364,31 @@ void OnTick()
    {
       g_diag.block_ambig++;
       return;
+   }
+
+   // Direction switches (0.6.0). Counted under 'wick' in the daily summary,
+   // the one counter nothing else in this engine uses.
+   if((ss.buy && !InpAllowLongs) || (ss.sell && !InpAllowShorts))
+   {
+      g_diag.block_wick++;
+      return;
+   }
+
+   // D1 reading gate (0.6.0): a side may trade only AGAINST an extended daily
+   // reading. Counted under 'nobias' in the daily summary.
+   if(InpD1GateMode != 0)
+   {
+      string d1dir; int d1str; string why;
+      if(!D1_Read(g_symbol, (D1Rule)InpD1Rule, hD1, 1, d1dir, d1str))
+      {
+         g_diag.block_indfail++;
+         return;
+      }
+      if(!D1_SideAllowed(ss.buy, (D1GateMode)InpD1GateMode, InpD1MinStrength, d1dir, d1str, why))
+      {
+         g_diag.block_nobias++;
+         return;
+      }
    }
 
    g_diag.signals++;

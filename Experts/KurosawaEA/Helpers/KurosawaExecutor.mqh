@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| File: Helpers/KurosawaExecutor.mqh                               |
 //| Type: Include Library (composes Risk + Exec + Time primitives)   |
 //| Ver : 0.1.0                                                      |
@@ -68,8 +68,10 @@ bool Exec_PlaceTrade(
    int &diag_block_stops
 )
 {
-   // Defensive: strategy/math must never send non-positive distances.
-   if(slPts <= 0.0 || tpPts <= 0.0)
+   // Defensive: strategy/math must never send a non-positive stop. A non-positive
+   // TP is allowed only when the engine says it runs without one (cfg.requireTp
+   // false): FadeEA exits on a bar count, not a target.
+   if(slPts <= 0.0 || (cfg.requireTp && tpPts <= 0.0))
       return false;
 
    // 1) Position sizing (fail-safe: 0.0 => skip the trade).
@@ -122,7 +124,7 @@ bool Exec_PlaceTrade(
       const double refClose = isBuy ? bid : ask;
 
       double sl = isBuy ? (entry - slPts * pt) : (entry + slPts * pt);
-      double tp = isBuy ? (entry + tpPts * pt) : (entry - tpPts * pt);
+      double tp = (tpPts > 0.0) ? (isBuy ? (entry + tpPts * pt) : (entry - tpPts * pt)) : 0.0;   // 0 = no take-profit
 
       // Validate/adjust SL/TP against the broker's minimum placement distance.
       if(!EnsureStopsLevelRef(sym, entry, refClose, sl, tp, isBuy, cfg.requireTp))

@@ -44,14 +44,19 @@ degradation limits, parameter stability, honest costs, build match, drawdown, an
 ```text
 Experts/KurosawaEA/
 ├── Engines/                 # MT5 lifecycle + execution; strategy-agnostic
-│   ├── RangeRevertEA.mq5
-│   ├── TrendEA.mq5
-│   ├── TrendPullbackEA.mq5
+│   ├── RangeRevertEA.mq5    # proven (M15, European morning, long only) - live
+│   ├── TrendEA.mq5          # rejected: entry has no edge in either session
+│   ├── TrendPullbackEA.mq5  # rejected
+│   ├── BreakoutEA.mq5       # rejected: London-range break in NY chops
+│   ├── FadeEA.mq5           # candidate: fades the D1 Breakout reading (thin)
 │   └── Archived/            # retired engines, kept for the record
 ├── Strategies/              # closed-bar signal judgment only, no execution
 │   ├── RangeRevert.mqh
 │   ├── Trend.mqh
 │   ├── TrendPullback.mqh
+│   ├── Breakout.mqh
+│   ├── Fade.mqh             # the D1 analyzer's reading, computed the analyzer's way
+│   ├── D1Reading.mqh        # D1 readings as a side gate (tested, rejected, default off)
 │   └── Archived/
 ├── Inputs/                  # input declarations, defaults, engine version
 ├── Helpers/                 # shared infrastructure
@@ -66,7 +71,7 @@ Experts/KurosawaEA/
 │   └── KurosawaSecrets.example.mqh
 ├── Signals/                 # D1 analyzers: post direction/strength, place no trades
 └── Presets/                 # the tunes, by session — see Presets/README.md
-    ├── London/  NewYork/  Tokyo/  Screening/
+    ├── London/  NewYork/  Tokyo/  Daily/  Screening/
 ```
 
 ---
