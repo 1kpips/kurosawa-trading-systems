@@ -130,6 +130,8 @@
 //   2026091001   RangeRevertEA     AUDJPY M15  (London_RangeRevert_AUDJPY_M15.set)
 //   2026091002   RangeRevertEA     NZDJPY M15  (London_RangeRevert_NZDJPY_M15.set)
 //   2026091003   RangeRevertEA     AUDJPY M15  (Tokyo_RangeRevert_AUDJPY_M15.set, Tokyo morning)
+//   2026091004   TokyoFixEA        USDJPY M5   (Tokyo_Fix_USDJPY_M5.set, 09:55 JST fix fade, 2026-09-10)
+//   2026091005   TokyoFixEA        EURJPY M5   (Tokyo_Fix_EURJPY_M5.set)
 //
 // Take a NEW slot for every additional chart, including a second instance of
 // the same engine on a different pair. The retired 20260117xx / 20260210xx
