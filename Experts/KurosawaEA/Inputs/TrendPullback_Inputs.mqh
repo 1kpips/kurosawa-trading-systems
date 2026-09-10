@@ -26,6 +26,9 @@ input string InpEaName    = "NewYork_TrendPullback_EURUSD_M5";
 input int    InpMagic     = 2026090303;
 input string InpEaId      = "ea-ny-trendpullback-eurusd-m5";
 // 0.4.2 = engine clock -> broker server time (2026-09-09)
+// Compile-time build. InpEaVersion is an INPUT and a .set can override it; this constant is what actually
+// runs, and the Init line prints both so a mismatch is visible in the log (AB t-67a9014).
+#define TRENDPULLBACK_BUILD "0.4.3"
 input string InpEaVersion = "0.4.2";
 // The TUNE version - one set of parameter values. Bumped on ANY parameter
 // change. Distinct from InpEaVersion above, which is the ENGINE build.

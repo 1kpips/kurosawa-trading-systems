@@ -151,7 +151,7 @@ int OnInit()
    EventSetTimer(KUROSAWA_ENGINE_TIMER_SEC);
 
    Print("Init OK. ", InpEaName, " sym=", g_symbol, " tf=", EnumToString(InpTargetTf),
-         " magic=", InpMagic, " engine=", InpEaVersion, " preset=", InpPresetVersion,
+         " magic=", InpMagic, " build=", BREAKOUT_BUILD, " engineInput=", InpEaVersion, " preset=", InpPresetVersion,
          " range=", InpRangeStartHour, "-", InpRangeEndHour, " entry=", InpStartHour, "-", InpEndHour,
          " flatAt=", InpFlatAtHour, " (server hours)");
    return INIT_SUCCEEDED;

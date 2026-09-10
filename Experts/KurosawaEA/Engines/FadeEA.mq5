@@ -115,7 +115,7 @@ int OnInit()
    EventSetTimer(KUROSAWA_ENGINE_TIMER_SEC);
 
    Print("Init OK. ", InpEaName, " sym=", g_symbol, " tf=", EnumToString(InpTargetTf),
-         " magic=", InpMagic, " engine=", InpEaVersion, " preset=", InpPresetVersion,
+         " magic=", InpMagic, " build=", FADE_BUILD, " engineInput=", InpEaVersion, " preset=", InpPresetVersion,
          " fade>=", InpMinStrength, " hold=", InpHoldBars, " bars, stop=", InpDisasterStopAtr, " ATR");
    return INIT_SUCCEEDED;
 }

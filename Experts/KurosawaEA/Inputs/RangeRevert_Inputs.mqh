@@ -34,6 +34,9 @@ input string InpEaId      = "ea-london-rangerevert-usdjpy-m5";
 // 0.6.0 = direction switches + D1 reading gate (2026-09-09); identical to 0.5.1 with the gate off
 // 0.6.1 = gate modes 4-6 "with the reading" (2026-09-10); gate-off path untouched
 // 0.7.0 = rolling-PF kill switch (2026-09-10); identical to 0.6.1 when InpKillRollingTrades = 0
+// Compile-time build. InpEaVersion is an INPUT and a .set can override it; this constant is what actually
+// runs, and the Init line prints both so a mismatch is visible in the log (AB t-67a9014).
+#define RANGEREVERT_BUILD "0.7.1"
 input string InpEaVersion = "0.7.0";
 // The TUNE version - one set of parameter values. Bumped on ANY parameter
 // change. Distinct from InpEaVersion above, which is the ENGINE build.

@@ -16,6 +16,9 @@ input string InpEaName        = "NewYork_Breakout_EURJPY_M15";
 input int    InpMagic         = 2026090913;
 input string InpEaId          = "ea-ny-breakout-eurjpy-m15";
 // 0.1.0 = first build (2026-09-09)
+// Compile-time build. InpEaVersion is an INPUT and a .set can override it; this constant is what actually
+// runs, and the Init line prints both so a mismatch is visible in the log (AB t-67a9014).
+#define BREAKOUT_BUILD "0.2.1"
 input string InpEaVersion     = "0.1.0";
 input string InpPresetVersion = "0.1.0";
 

@@ -15,6 +15,9 @@ input string InpEaName        = "Fade_USDJPY_D1";
 input int    InpMagic         = 2026090915;
 input string InpEaId          = "ea-fade-usdjpy-d1";
 // 0.1.0 = first build (2026-09-09)
+// Compile-time build. InpEaVersion is an INPUT and a .set can override it; this constant is what actually
+// runs, and the Init line prints both so a mismatch is visible in the log (AB t-67a9014).
+#define FADE_BUILD "0.1.1"
 input string InpEaVersion     = "0.1.0";
 input string InpPresetVersion = "0.1.0";
 

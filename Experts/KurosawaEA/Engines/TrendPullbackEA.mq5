@@ -243,6 +243,12 @@ int OnInit()
    // depend on this chart's tick flow (see KurosawaHelpers.mqh).
    EventSetTimer(KUROSAWA_ENGINE_TIMER_SEC);
 
+   // One line per (re)load so the log proves which build and which preset are running.
+   Print("Init OK. ", InpEaName, " id=", InpEaId, " sym=", g_symbol, " tf=", EnumToString(InpTargetTf),
+         " magic=", InpMagic, " build=", TRENDPULLBACK_BUILD, " engineInput=", InpEaVersion, " preset=", InpPresetVersion,
+         " session=", InpStartHour, "-", InpEndHour, " utcOffset=", InpUtcOffset,
+         " (server hours ", (InpStartHour - InpUtcOffset + 24) % 24, "-", (InpEndHour - InpUtcOffset + 24) % 24, ")");
+
    return INIT_SUCCEEDED;
 }
 
