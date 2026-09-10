@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| File: Helpers/KurosawaHelpers.mqh                                |
 //| Type: Umbrella Include Library                                   |
 //| Ver : 0.3.0                                                      |
@@ -66,6 +66,7 @@
 
 // 4) Tracking (self-contained; optional)
 #include "KurosawaTrack.mqh"
+#include "KurosawaKillSwitch.mqh"
 
 // 5) Indicator handle factory / packs (self-contained; optional)
 #include "KurosawaIndicatorFactory.mqh"
@@ -122,6 +123,13 @@
 //   2026090915   FadeEA            USDJPY D1   (engine default)
 //   2026090916   FadeEA            any    D1   (Fade_Multi_D1.set / Fade70_Multi_D1.set, screening)
 //   2026090917   RangeRevertEA     any    M15  (RangeRevert_Multi_M15_D1gate.set, D1-gate screening)
+//   2026090918   RangeRevertEA     any    M15  (RangeRevert_Multi_M15_D1with.set, with-trend test)
+//   2026090919   RangeRevertEA     any    M5   (RangeRevert_Multi_M5_D1with.set, with-trend test)
+//
+// Assigned 2026-09-10, yen-cross pair presets:
+//   2026091001   RangeRevertEA     AUDJPY M15  (London_RangeRevert_AUDJPY_M15.set)
+//   2026091002   RangeRevertEA     NZDJPY M15  (London_RangeRevert_NZDJPY_M15.set)
+//   2026091003   RangeRevertEA     AUDJPY M15  (Tokyo_RangeRevert_AUDJPY_M15.set, Tokyo morning)
 //
 // Take a NEW slot for every additional chart, including a second instance of
 // the same engine on a different pair. The retired 20260117xx / 20260210xx

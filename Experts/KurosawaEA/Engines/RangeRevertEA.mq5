@@ -46,6 +46,7 @@ CTrade trade;
 // ------------------------------------------------------------------
 int hAdx = INVALID_HANDLE;
 D1Handles hD1;                 // D1 reading gate (0.6.0); unused when InpD1GateMode == 0
+KillState g_kill;              // rolling-PF kill switch (0.7.0); inert when InpKillRollingTrades == 0
 int hAtr = INVALID_HANDLE;
 int hRsi = INVALID_HANDLE;
 int hBb  = INVALID_HANDLE;
@@ -148,9 +149,9 @@ int OnInit()
    D1Handles_Reset(hD1);
    if(InpD1GateMode != 0)
    {
-      if(InpD1GateMode < 0 || InpD1GateMode > 3 || InpD1Rule < 0 || InpD1Rule > 1)
+      if(InpD1GateMode < 0 || InpD1GateMode > 6 || InpD1Rule < 0 || InpD1Rule > 1)
       {
-         Print("INIT_PARAMETERS_INCORRECT: InpD1GateMode must be 0-3 and InpD1Rule 0-1 (got ", InpD1GateMode, "/", InpD1Rule, ")");
+         Print("INIT_PARAMETERS_INCORRECT: InpD1GateMode must be 0-6 and InpD1Rule 0-1 (got ", InpD1GateMode, "/", InpD1Rule, ")");
          return INIT_PARAMETERS_INCORRECT;
       }
       EnsureHistory(g_symbol, PERIOD_D1, 120);
@@ -160,6 +161,8 @@ int OnInit()
          return INIT_FAILED;
       }
    }
+
+   Kill_Reset(g_kill);
 
    Risk_Init(g_risk, TradingDayNow());   // seed risk day on the unified UTC trading-day clock
 
@@ -262,6 +265,19 @@ void OnTick()
       if(RR_CheckMaxHoldAndClose(trade, sym, (long)InpMagic, InpMaxHoldMinutes, now))
          return;
 
+      return;
+   }
+
+   // ----------------------------------------------------------------
+   // 1b) Kill switch (0.7.0): is the edge still there? Rolling PF of this
+   //     instance's last N closed trades. Pauses new entries, never exits.
+   //     Counted under 'loss' in the daily summary.
+   // ----------------------------------------------------------------
+   if(!Kill_EntriesAllowed(g_kill, sym, (long)InpMagic,
+                           InpKillRollingTrades, InpKillMinPf, InpKillPauseDays, InpKillProbationTrades,
+                           g_lastCloseDealId, now, InpEaName))
+   {
+      g_diag.block_loss++;
       return;
    }
 

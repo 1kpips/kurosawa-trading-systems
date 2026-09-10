@@ -32,7 +32,9 @@ input int    InpMagic     = 2026090302;
 input string InpEaId      = "ea-london-rangerevert-usdjpy-m5";
 // 0.5.1 = engine clock -> broker server time (2026-09-09); tester-identical to 0.5.0
 // 0.6.0 = direction switches + D1 reading gate (2026-09-09); identical to 0.5.1 with the gate off
-input string InpEaVersion = "0.6.0";
+// 0.6.1 = gate modes 4-6 "with the reading" (2026-09-10); gate-off path untouched
+// 0.7.0 = rolling-PF kill switch (2026-09-10); identical to 0.6.1 when InpKillRollingTrades = 0
+input string InpEaVersion = "0.7.0";
 // The TUNE version - one set of parameter values. Bumped on ANY parameter
 // change. Distinct from InpEaVersion above, which is the ENGINE build.
 // Presets and backtests on 1kpips.com key on this field, not on InpEaVersion.
@@ -214,6 +216,7 @@ input bool InpRequireReclaim = false;
 // (forward-return study 2026-09-09): a strong LONG reading means the move is
 // extended. The gate lets a side trade only AGAINST such a reading:
 //   InpD1GateMode  0 off | 1 shorts need extended-UP | 2 longs need extended-DOWN | 3 both
+//                  4 longs need a LONG reading | 5 shorts need SHORT | 6 both (WITH the reading)
 //   InpD1MinStrength  reading strength required (analyzer scale, 0-100)
 //   InpD1Rule      0 Breakout (20-bar range + ATR expansion) | 1 DailyTrend (EMA20/50 + ADX)
 // Defaults reproduce 0.5.1 exactly: both sides allowed, gate off.
@@ -223,3 +226,18 @@ input int  InpD1GateMode     = 0;
 input int  InpD1MinStrength  = 70;
 input int  InpD1Rule         = 0;
 
+// ------------------------------------------------------------------
+// Kill switch (added 0.7.0, 2026-09-10) - see Helpers/KurosawaKillSwitch.mqh
+// ------------------------------------------------------------------
+// Columns: InpKillRollingTrades, InpKillMinPf, InpKillPauseDays, InpKillProbationTrades
+//
+// The presets that passed 2023-2026 failed 2019-2022: a REGIME edge. A regime edge may
+// run live at minimum lot, but it must notice when the regime ends. This measures the
+// edge itself - the profit factor of this instance's last N closed trades - and pauses
+// new entries for a fixed number of days when it falls below the threshold. After the
+// pause, K trades of probation before the next check. Open positions are never touched.
+// 0 = off (the tester sees the raw edge). Live presets carry 30 / 0.8 / 20 / 10.
+input int    InpKillRollingTrades   = 0;
+input double InpKillMinPf           = 0.8;
+input int    InpKillPauseDays       = 20;
+input int    InpKillProbationTrades = 10;

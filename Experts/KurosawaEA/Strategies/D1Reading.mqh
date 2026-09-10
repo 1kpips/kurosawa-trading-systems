@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| File: Strategies/D1Reading.mqh                                   |
 //| Type: Shared reading (pure), used as a GATE by intraday engines  |
 //| Ver : 0.1.0                                                      |
@@ -40,7 +40,14 @@ enum D1GateMode
    D1_GATE_OFF          = 0,   // readings ignored (engine behaves as before)
    D1_GATE_SHORTS_ONLY  = 1,   // shorts need an extended-UP reading; longs ungated
    D1_GATE_LONGS_ONLY   = 2,   // longs need an extended-DOWN reading; shorts ungated
-   D1_GATE_BOTH         = 3    // each side needs the opposite reading
+   D1_GATE_BOTH         = 3,   // each side needs the opposite reading
+   // WITH the reading (added 2026-09-10 to test "buy the dips while D1 is up").
+   // The forward-return study says the D1 drift after a LONG reading is slightly
+   // negative, so the expectation is that these modes cut trades without adding
+   // edge. They exist so that is measured, not argued.
+   D1_GATE_WITH_LONGS   = 4,   // longs need a LONG reading; shorts ungated
+   D1_GATE_WITH_SHORTS  = 5,   // shorts need a SHORT reading; longs ungated
+   D1_GATE_WITH_BOTH    = 6    // each side needs its own reading
 };
 
 struct D1Handles
@@ -145,13 +152,17 @@ bool D1_SideAllowed(const bool isBuy, const D1GateMode mode, const int minStreng
                     const string direction, const int strength, string &why)
 {
    why = "";
-   const bool gateThisSide = (mode == D1_GATE_BOTH) ||
-                             (isBuy  && mode == D1_GATE_LONGS_ONLY) ||
-                             (!isBuy && mode == D1_GATE_SHORTS_ONLY);
-   if(mode == D1_GATE_OFF || !gateThisSide) return true;
+   if(mode == D1_GATE_OFF) return true;
 
-   // Against the reading: a short needs extended-UP, a long needs extended-DOWN.
-   const string need = isBuy ? "SHORT" : "LONG";
+   const bool withMode = (mode >= D1_GATE_WITH_LONGS);
+   const bool gateThisSide = withMode
+      ? ((mode == D1_GATE_WITH_BOTH) || (isBuy && mode == D1_GATE_WITH_LONGS) || (!isBuy && mode == D1_GATE_WITH_SHORTS))
+      : ((mode == D1_GATE_BOTH)      || (isBuy && mode == D1_GATE_LONGS_ONLY) || (!isBuy && mode == D1_GATE_SHORTS_ONLY));
+   if(!gateThisSide) return true;
+
+   // Against the reading (modes 1-3): a short needs extended-UP, a long needs extended-DOWN.
+   // With the reading (modes 4-6): a long needs LONG, a short needs SHORT.
+   const string need = withMode ? (isBuy ? "LONG" : "SHORT") : (isBuy ? "SHORT" : "LONG");
    if(direction != need || strength < minStrength)
    {
       why = StringFormat("D1 reads %s/%d, %s needs %s>=%d", direction, strength, (isBuy ? "long" : "short"), need, minStrength);

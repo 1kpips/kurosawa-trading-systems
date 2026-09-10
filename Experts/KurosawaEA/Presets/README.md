@@ -1,44 +1,35 @@
 # Presets/
 
-Every `.set` here is a **tune**: one complete set of inputs for one engine, in the
-format MT5's Strategy Tester and chart dialog both load (`Inputs → Load`). Nothing
-is hard-coded elsewhere — the values in these files are the values that ran.
+Ready‑to‑attach **preset EAs**, grouped by trading session. A preset is a thin
+wrapper that binds one strategy/engine to a specific **symbol, timeframe, and
+session**, with inputs already tuned for that context — so you can attach it to
+a chart without hand‑configuring every input.
 
-Each file starts with a comment block that says what changed from the previous
-version and *why*, with the numbers. The results themselves are published, run by
-run, at **https://1kpips.com/en/presets** — including the runs that failed and the
-reason each was rejected. A preset with no filed result has not been tested.
-
-## Layout
-
-| Folder | What is in it |
-|---|---|
-| `London/` | Per-pair presets for the 07:00–13:00 **broker server time** window (see below). The three marked `proven` on the site are running live at minimum lot. |
-| `NewYork/`, `Tokyo/` | The same values with only the session changed. All rejected — the reason is in the file header and on the site. Kept so the negative result stays visible. |
-| `Daily/` | `FadeEA` (D1) presets: fade the Breakout analyzer's strong readings. Candidate, not proven — the sign replicated on two data sources, the size did not. |
-| `Screening/` | `*_Multi_*` files have `InpTargetPair` empty and run unchanged across pairs (select the Expert first, then Load, then change only the Symbol). `*_opt_*` files are optimisation grids with the swept inputs flagged. `*_D1gate*` files test the D1 readings as a side gate for RangeRevert — all three tiers rejected out of sample. |
-
-## Naming
+## Naming convention
 
 ```
-{Session}_{Strategy}_{Pair}_{TF}.set        one pair, one session
-{Strategy}_Multi_{TF}.set                   any pair, screening
-{Session}_{Strategy}_{Pair}_{TF}_opt_{what}.set   optimisation grid
+{Session}_{Strategy}_{Pair}_{Timeframe}
 ```
 
-`InpPresetVersion` inside the file is the tune's version; `InpEaVersion` is the engine
-build it was tested on. Both are filed with every result.
+e.g. `London_SwingTrend_GBPJPY_H1`. Each preset is a pair of files:
 
-## Session hours are broker server time
+- `*.mq5` — the compiled preset EA.
+- `*.mqh` — that preset's input values.
 
-`InpStartHour` / `InpEndHour` with `InpUtcOffset` are applied to the **broker's server
-clock**, which is what the Strategy Tester uses too — so what is tested is what runs.
-On OANDA Japan the server is UTC+2 in winter and UTC+3 in summer. `16`–`22` with offset
-`9` therefore means 07:00–13:00 server, i.e. 04:00–10:00 UTC in summer. Label your own
-sessions the same way; a UTC label here would be wrong twice a year.
+## Folders
 
-## Preset EA wrappers
+| Folder | Session | Example presets |
+|---|---|---|
+| `Tokyo/` | Tokyo | `Tokyo_SwingTrend_USDJPY_H1`, `Tokyo_RangeRevert_USDJPY_M5`, `Tokyo_ScalpHigh_USDJPY_M1`, `Tokyo_DaytradeScalp_USDJPY_M5` |
+| `London/` | London | `London_SwingTrend_{EURUSD,EURJPY,GBPJPY}_H1`, `London_RangeRevert_EURGBP_M5`, `London_ScalpHigh_EURUSD_M1` |
+| `New York/` | New York | `NewYork_SwingTrend_{AUDUSD,GBPUSD}_H1`, `NewYork_RangeRevert_USDCAD_M5`, `NewYork_TrendPullback_EURUSD_M5` |
 
-Earlier versions of this repo shipped `Presets/{Session}/*.mq5` wrapper EAs. They were
-retired in favour of `.set` files (one binary per engine, values in the file); the
-wrappers no longer compiled against the current helpers and are not published.
+## Notes
+
+- Session timing uses a fixed UTC offset (no DST auto‑adjust — see
+  `../Helpers/KurosawaTime.mqh`). Adjust the offset seasonally if you need to
+  track a wall‑clock session precisely.
+- Preset input values are **starting points**, not guarantees; re‑tune per
+  broker, spread, and market conditions.
+- Some presets target strategies kept under the `Archived/` folders; treat those
+  as reference rather than the current product line.
