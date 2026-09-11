@@ -225,10 +225,29 @@ void OnTick()
    // ----------------------------------------------------------------
    // 5) One attempt. Success or a rejected send both consume the day.
    // ----------------------------------------------------------------
-   g_lastLdnYmdTried = ymd;
-   g_diag.signals++;
    const bool   isBuy = (side > 0);
    const double slPts = (InpStopPips > 0.0) ? InpStopPips * PipPoints(sym) : 0.0;
+   // ----------------------------------------------------------------
+   // 5b) Portfolio cap (account-level; KurosawaPortfolio.mqh). Refuses the
+   //    entry when the account as a whole is full; never touches positions.
+   // ----------------------------------------------------------------
+   {
+      PortfolioLimits lim;
+      lim.maxPositions     = InpPortfolioMaxPositions;
+      lim.maxRiskPercent   = InpPortfolioMaxRiskPercent;
+      lim.dailyLossPercent = InpPortfolioDailyLossPct;
+      lim.maxPerCurrency   = InpPortfolioMaxPerCurrency;
+      string pwhy;
+      if(!Portfolio_HasRoom(sym, Portfolio_RiskMoney(sym, InpFixedLot, slPts), lim, pwhy))
+      {
+         g_diag.block_portfolio++;
+         if(g_diag.block_portfolio == 1) Print("PORTFOLIO_BLOCK ", InpEaName, " ", sym, ": ", pwhy);
+         g_lastLdnYmdTried = ymd; return;
+      }
+   }
+
+   g_lastLdnYmdTried = ymd;
+   g_diag.signals++;
    Print("LONDONFIX_ENTRY ", (isBuy ? "BUY" : "SELL"), " ", sym, " ", why, " london=", TimeToString(ldn, TIME_DATE | TIME_MINUTES),
          " pre-move ", DoubleToString(preMovePips, 1), " pips over ", InpPreWindowMin, "min, exit in ", InpHoldMinutes, "min slPts=", DoubleToString(slPts, 0));
    if(PlaceTrade(sym, isBuy, slPts))

@@ -19,7 +19,8 @@ input string InpEaId          = "ea-londonfix-gbpusd-m5";
 // 0.1.0 = first build (2026-09-11)
 // Compile-time build. InpEaVersion is an INPUT and a .set can override it; this constant is what actually
 // runs, and the Init line prints both so a mismatch is visible in the log.
-#define LONDONFIX_BUILD "0.1.0"
+// 0.1.1 = portfolio cap inputs (2026-09-11)
+#define LONDONFIX_BUILD "0.1.1"
 input string InpEaVersion     = "0.1.0";
 input string InpPresetVersion = "0.1.0";
 
@@ -71,3 +72,15 @@ input int    InpMaxHoldMinutes        = 0;    // 0 = off; the clock exit is InpH
 input bool   InpUseTrailing      = false;
 input double InpTrailStartR      = 0.0;
 input double InpTrailStepAtrMult = 0.0;
+
+// ------------------------------------------------------------------
+// Portfolio (account-level) cap - see Helpers/KurosawaPortfolio.mqh
+// ------------------------------------------------------------------
+// Every instance on the account evaluates the same four numbers before it sends an
+// order, so the seven charts share one budget without talking to each other.
+// 0 = that limit is off. The tester runs one instance, so the caps never bind there
+// and a filed backtest is unchanged. Live sets carry 4 / 1.0 / 2.0 / 3.
+input int    InpPortfolioMaxPositions   = 0;    // open positions on the account, all symbols
+input double InpPortfolioMaxRiskPercent = 0.0;  // open distance-to-stop money + this trade, % of balance
+input double InpPortfolioDailyLossPct   = 0.0;  // realized today + floating, all magics, % of day-start balance
+input int    InpPortfolioMaxPerCurrency = 0;    // open positions sharing this trade's base or quote currency

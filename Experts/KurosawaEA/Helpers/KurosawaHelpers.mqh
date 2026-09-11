@@ -67,6 +67,7 @@
 // 4) Tracking (self-contained; optional)
 #include "KurosawaTrack.mqh"
 #include "KurosawaKillSwitch.mqh"
+#include "KurosawaPortfolio.mqh"
 
 // 5) Indicator handle factory / packs (self-contained; optional)
 #include "KurosawaIndicatorFactory.mqh"

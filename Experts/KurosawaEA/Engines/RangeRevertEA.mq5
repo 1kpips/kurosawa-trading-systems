@@ -184,7 +184,8 @@ int OnInit()
          " session=", InpStartHour, "-", InpEndHour, " utcOffset=", InpUtcOffset,
          " (server hours ", (InpStartHour - InpUtcOffset + 24) % 24, "-", (InpEndHour - InpUtcOffset + 24) % 24, ")",
          " longs=", InpAllowLongs, " shorts=", InpAllowShorts, " rsiSellAbove=", InpRsiSellAbove,
-         " d1Gate=", InpD1GateMode, " kill=", InpKillRollingTrades, "/", InpKillMinPf, "/", InpKillPauseDays, "/", InpKillProbationTrades);
+         " d1Gate=", InpD1GateMode, " kill=", InpKillRollingTrades, "/", InpKillMinPf, "/", InpKillPauseDays, "/", InpKillProbationTrades,
+         " portfolio=", InpPortfolioMaxPositions, "/", InpPortfolioMaxRiskPercent, "/", InpPortfolioDailyLossPct, "/", InpPortfolioMaxPerCurrency);
 
    return INIT_SUCCEEDED;
 }
@@ -434,6 +435,25 @@ void OnTick()
    {
       g_diag.block_stops++;
       return;
+   }
+
+   // ----------------------------------------------------------------
+   // 5b) Portfolio cap (account-level; KurosawaPortfolio.mqh). Refuses the
+   //    entry when the account as a whole is full; never touches positions.
+   // ----------------------------------------------------------------
+   {
+      PortfolioLimits lim;
+      lim.maxPositions     = InpPortfolioMaxPositions;
+      lim.maxRiskPercent   = InpPortfolioMaxRiskPercent;
+      lim.dailyLossPercent = InpPortfolioDailyLossPct;
+      lim.maxPerCurrency   = InpPortfolioMaxPerCurrency;
+      string pwhy;
+      if(!Portfolio_HasRoom(sym, Portfolio_RiskMoney(sym, InpFixedLot, slPts), lim, pwhy))
+      {
+         g_diag.block_portfolio++;
+         if(g_diag.block_portfolio == 1) Print("PORTFOLIO_BLOCK ", InpEaName, " ", sym, ": ", pwhy);
+         return;
+      }
    }
 
    // ----------------------------------------------------------------

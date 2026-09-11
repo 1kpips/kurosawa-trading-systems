@@ -102,6 +102,7 @@ struct DailyDiag
    int               block_stops;
    int               block_orderfail;
    int               block_nobias;    // EMA fast == slow (no trend)
+   int               block_portfolio; // account-level cap refused the entry (KurosawaPortfolio.mqh)
 
 
    void              Reset(const int newYmd)
@@ -124,6 +125,7 @@ struct DailyDiag
       block_nosignal = 0;
       block_ambig = 0;
       block_indfail = 0;
+      block_portfolio = 0;
       block_wick = 0;
 
       block_stops = 0;
@@ -209,7 +211,7 @@ void PrintDailySummary(
 )
   {
    PrintFormat(
-      "%s (%s,%s) Daily Summary: ymd=%d | Bars=%d Signals=%d Trades=%d | Blocks session=%d spread=%d adx=%d atr=%d cooldown=%d haspos=%d loss=%d maxday=%d maxtrades=%d nosignal=%d ambig=%d indfail=%d wick=%d stops=%d orderfail=%d nobias=%d",
+      "%s (%s,%s) Daily Summary: ymd=%d | Bars=%d Signals=%d Trades=%d | Blocks session=%d spread=%d adx=%d atr=%d cooldown=%d haspos=%d loss=%d maxday=%d maxtrades=%d nosignal=%d ambig=%d indfail=%d wick=%d stops=%d orderfail=%d nobias=%d portfolio=%d",
       eaName, symbol, TrackTfToString(tf),
       d.ymd,
       d.bars, d.signals, d.trades,
@@ -228,7 +230,8 @@ void PrintDailySummary(
       d.block_wick,
       d.block_stops,
       d.block_orderfail,
-      d.block_nobias
+      d.block_nobias,
+      d.block_portfolio
    );
   }
 

@@ -36,7 +36,8 @@ input string InpEaId      = "ea-london-rangerevert-usdjpy-m5";
 // 0.7.0 = rolling-PF kill switch (2026-09-10); identical to 0.6.1 when InpKillRollingTrades = 0
 // Compile-time build. InpEaVersion is an INPUT and a .set can override it; this constant is what actually
 // runs, and the Init line prints both so a mismatch is visible in the log (AB t-67a9014).
-#define RANGEREVERT_BUILD "0.7.1"
+// 0.7.2 = portfolio cap inputs (2026-09-11); identical to 0.7.1 when all four are 0
+#define RANGEREVERT_BUILD "0.7.2"
 input string InpEaVersion = "0.7.0";
 // The TUNE version - one set of parameter values. Bumped on ANY parameter
 // change. Distinct from InpEaVersion above, which is the ENGINE build.
@@ -244,3 +245,15 @@ input int    InpKillRollingTrades   = 0;
 input double InpKillMinPf           = 0.8;
 input int    InpKillPauseDays       = 20;
 input int    InpKillProbationTrades = 10;
+
+// ------------------------------------------------------------------
+// Portfolio (account-level) cap - see Helpers/KurosawaPortfolio.mqh
+// ------------------------------------------------------------------
+// Every instance on the account evaluates the same four numbers before it sends an
+// order, so the seven charts share one budget without talking to each other.
+// 0 = that limit is off. The tester runs one instance, so the caps never bind there
+// and a filed backtest is unchanged. Live sets carry 4 / 1.0 / 2.0 / 3.
+input int    InpPortfolioMaxPositions   = 0;    // open positions on the account, all symbols
+input double InpPortfolioMaxRiskPercent = 0.0;  // open distance-to-stop money + this trade, % of balance
+input double InpPortfolioDailyLossPct   = 0.0;  // realized today + floating, all magics, % of day-start balance
+input int    InpPortfolioMaxPerCurrency = 0;    // open positions sharing this trade's base or quote currency

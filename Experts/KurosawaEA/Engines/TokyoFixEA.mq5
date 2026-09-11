@@ -98,6 +98,7 @@ int OnInit()
          " magic=", InpMagic, " build=", TOKYOFIX_BUILD, " engineInput=", InpEaVersion, " preset=", InpPresetVersion,
          " fix=", InpFixHour, ":", InpFixMinute, " JST +", InpEntryDelayMin, "min hold=", InpHoldMinutes,
          "min side=", InpSide, " days=", EnumToString(InpDayFilter), " jpHolidays=", (InpSkipJpHolidays ? "skip" : "trade"), " stop=", InpStopPips, " pips",
+         " portfolio=", InpPortfolioMaxPositions, "/", InpPortfolioMaxRiskPercent, "/", InpPortfolioDailyLossPct, "/", InpPortfolioMaxPerCurrency,
          " (server ", TimeToString(EngineClock(), TIME_DATE | TIME_MINUTES), " = JST ", TimeToString(jst, TIME_DATE | TIME_MINUTES), ")");
    return INIT_SUCCEEDED;
 }
@@ -200,10 +201,29 @@ void OnTick()
    // ----------------------------------------------------------------
    // 4) One attempt. Success or a rejected send both consume the day.
    // ----------------------------------------------------------------
-   g_lastJstYmdTried = ymd;
-   g_diag.signals++;
    const bool   isBuy = (InpSide > 0);
    const double slPts = (InpStopPips > 0.0) ? InpStopPips * PipPoints(sym) : 0.0;
+   // ----------------------------------------------------------------
+   // 4b) Portfolio cap (account-level; KurosawaPortfolio.mqh). Refuses the
+   //    entry when the account as a whole is full; never touches positions.
+   // ----------------------------------------------------------------
+   {
+      PortfolioLimits lim;
+      lim.maxPositions     = InpPortfolioMaxPositions;
+      lim.maxRiskPercent   = InpPortfolioMaxRiskPercent;
+      lim.dailyLossPercent = InpPortfolioDailyLossPct;
+      lim.maxPerCurrency   = InpPortfolioMaxPerCurrency;
+      string pwhy;
+      if(!Portfolio_HasRoom(sym, Portfolio_RiskMoney(sym, InpFixedLot, slPts), lim, pwhy))
+      {
+         g_diag.block_portfolio++;
+         if(g_diag.block_portfolio == 1) Print("PORTFOLIO_BLOCK ", InpEaName, " ", sym, ": ", pwhy);
+         g_lastJstYmdTried = ymd; return;
+      }
+   }
+
+   g_lastJstYmdTried = ymd;
+   g_diag.signals++;
    Print("TOKYOFIX_ENTRY ", (isBuy ? "BUY" : "SELL"), " ", sym, " ", why, " jst=", TimeToString(jst, TIME_DATE | TIME_MINUTES),
          " exit in ", InpHoldMinutes, "min slPts=", DoubleToString(slPts, 0));
    if(PlaceTrade(sym, isBuy, slPts))
