@@ -134,6 +134,8 @@
 //   2026091005   TokyoFixEA        EURJPY M5   (Tokyo_Fix_EURJPY_M5.set)
 //   2026091006   TokyoFixEA        GBPJPY M5   (Tokyo_Fix_GBPJPY_M5.set)
 //   2026091007   TokyoFixEA        AUDJPY M5   (Tokyo_Fix_AUDJPY_M5.set)
+//   2026091008   LondonFixEA       GBPUSD M5   (London_Fix_GBPUSD_M5.set, 16:00 London month-end fade, 2026-09-11)
+//   2026091009   LondonFixEA       EURGBP M5   (London_Fix_EURGBP_M5.set)
 //
 // Take a NEW slot for every additional chart, including a second instance of
 // the same engine on a different pair. The retired 20260117xx / 20260210xx
