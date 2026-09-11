@@ -97,7 +97,7 @@ int OnInit()
    Print("Init OK. ", InpEaName, " id=", InpEaId, " sym=", g_symbol, " tf=", EnumToString(InpTargetTf),
          " magic=", InpMagic, " build=", TOKYOFIX_BUILD, " engineInput=", InpEaVersion, " preset=", InpPresetVersion,
          " fix=", InpFixHour, ":", InpFixMinute, " JST +", InpEntryDelayMin, "min hold=", InpHoldMinutes,
-         "min side=", InpSide, " days=", EnumToString(InpDayFilter), " stop=", InpStopPips, " pips",
+         "min side=", InpSide, " days=", EnumToString(InpDayFilter), " jpHolidays=", (InpSkipJpHolidays ? "skip" : "trade"), " stop=", InpStopPips, " pips",
          " (server ", TimeToString(EngineClock(), TIME_DATE | TIME_MINUTES), " = JST ", TimeToString(jst, TIME_DATE | TIME_MINUTES), ")");
    return INIT_SUCCEEDED;
 }
@@ -164,7 +164,7 @@ void OnTick()
    if(ymd == g_lastJstYmdTried) return;
 
    string why;
-   if(!TFix_DayAllowed(jst, InpDayFilter, why))
+   if(!TFix_DayAllowed(jst, InpDayFilter, InpSkipJpHolidays, why))
    {
       g_lastJstYmdTried = ymd;      // decided for today
       g_diag.block_nosignal++;

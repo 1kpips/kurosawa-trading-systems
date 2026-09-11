@@ -20,7 +20,8 @@ input string InpEaId          = "ea-tokyofix-usdjpy-m5";
 // 0.1.0 = first build (2026-09-10)
 // Compile-time build. InpEaVersion is an INPUT and a .set can override it; this constant is what actually
 // runs, and the Init line prints both so a mismatch is visible in the log.
-#define TOKYOFIX_BUILD "0.1.0"
+// 0.2.0 = Japanese holiday calendar (2026-09-11): InpSkipJpHolidays; identical to 0.1.0 when false
+#define TOKYOFIX_BUILD "0.2.0"
 input string InpEaVersion     = "0.1.0";
 input string InpPresetVersion = "0.1.0";
 
@@ -47,6 +48,7 @@ input int    InpHoldMinutes      = 25;    // exit on the clock: fix + delay + ho
 input TokyoFixDayFilter InpDayFilter = TFIX_GOTOBI_MONTHEND;
 input int    InpSide             = -1;    // -1 = short (the measured effect), +1 = long (control)
 input double InpStopPips         = 20.0;  // protective stop in pips (0 = none); MAE 90th pct was 16 pips
+input bool   InpSkipJpHolidays   = true;  // no banks, no fix: skip JP holidays and roll gotobi flows back past them
 
 //--- Execution
 input int InpDeviationPoints = 20;
