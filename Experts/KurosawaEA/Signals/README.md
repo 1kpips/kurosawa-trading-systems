@@ -22,6 +22,11 @@ page. They **place no trades** — they only analyze and report.
 - **Closed‑bar, once per day.** Each EA fires when a new closed D1 bar appears,
   computes a direction (`LONG` / `SHORT` / `FLAT`) and a `0–100` strength, and
   posts once for that bar.
+- **Retry, then backfill.** A failed post is retried before the bar is given
+  up. On attach, each series reads the site's recent history and publishes
+  every closed bar of the last 10 that has no reading (a terminal that was off
+  over a close, or over a weekend). Such readings say "published late" in
+  their description; a bar the site already holds is never re-sent.
 - **Shared publisher.** JSON building, the HTTP `POST`, and the bounded retry
   live in `../Helpers/KurosawaSignalPublisher.mqh`; each analyzer just fills a
   payload and calls it. This keeps the three EAs free of duplicated networking
