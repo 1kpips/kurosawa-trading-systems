@@ -23,7 +23,9 @@ input double InpMinAtrRatio        = 1.00;         // ATR(shift=1) / avgATR >= t
 // ---- Signal API
 input bool   InpSignalEnable       = true;
 input string InpSignalApiUrl       = "https://1kpips.com/api/signals/set";
-input string InpSignalApiKey       = KUROSAWA_API_KEY;
+// The API key is NOT an input: MT5 writes every input value into chart
+// profiles, .set files and the tester journal in plain text. It is read
+// straight from KUROSAWA_API_KEY (git-ignored KurosawaSecrets.mqh).
 input string InpEaId               = "ea-signal-d1-breakout";
 input string InpEaName             = "D1_Breakout_Signal";
 input string InpEaVersion          = "0.1.0";
@@ -35,8 +37,16 @@ input int    InpHttpTimeoutMs      = 5000;
 // to verify the pipeline, or to recover a signal missed while MT5 was down.
 input bool   InpSendOnInit         = false;
 
+// On attach, publish the closed bars MT5 missed while it was down: every bar in
+// the window the site has no reading for. Never one it already holds.
+input bool   InpBackfillOnInit     = true;
+input int    InpBackfillMaxBars    = 10;      // two trading weeks
+
 //==================== State ====================//
 datetime g_lastClosedBarTime = 0;
+int      g_barTries          = 0;   // publish attempts for the pending bar
+datetime g_nextBarTry        = 0;   // earliest local time for the next attempt
+SignalBackfill g_backfill;
 
 string  g_lastDirection = "N/A";
 int     g_lastStrength  = 0;
@@ -71,17 +81,17 @@ bool GetCloseAtShift(const int shift, double &val)
    return true;
 }
 
-bool GetHighLowRangePrev(const int lookbackBars, double &hi, double &lo)
+bool GetHighLowRangePrev(const int shift, const int lookbackBars, double &hi, double &lo)
 {
-   // We exclude shift=1 bar from the range calculation.
-   // Use shifts 2..(lookbackBars+1)
+   // We exclude the signal bar itself from the range calculation.
+   // Use shifts (shift+1)..(shift+lookbackBars)
    double highs[], lows[];
    ArraySetAsSeries(highs, true);
    ArraySetAsSeries(lows, true);
 
    int need = lookbackBars;
-   if(CopyHigh(_Symbol, InpTf, 2, need, highs) != need) return false;
-   if(CopyLow (_Symbol, InpTf, 2, need, lows)  != need) return false;
+   if(CopyHigh(_Symbol, InpTf, shift + 1, need, highs) != need) return false;
+   if(CopyLow (_Symbol, InpTf, shift + 1, need, lows)  != need) return false;
 
    hi = highs[0];
    lo = lows[0];
@@ -116,25 +126,38 @@ bool GetAtrAverage(const int startShift, const int bars, double &avg)
    return true;
 }
 
+void FillConfig(SignalPubConfig &cfg)
+{
+   cfg.enable        = InpSignalEnable;
+   cfg.apiUrl        = InpSignalApiUrl;
+   cfg.apiKey        = KUROSAWA_API_KEY;
+   cfg.httpTimeoutMs = InpHttpTimeoutMs;
+   cfg.eaId          = InpEaId;
+   cfg.eaName        = InpEaName;
+   cfg.eaVersion     = InpEaVersion;
+   cfg.maxRetries    = 2;
+}
+
 //+------------------------------------------------------------------+
-// Compute + send once per new closed D1 bar
+// Compute + send one closed D1 bar: shift 1 on a rollover, older
+// shifts when backfilling after downtime.
 //| (JSON build + WebRequest + retry live in Signal_Post(),           |
 //|  ../Helpers/KurosawaSignalPublisher.mqh)                          |
 //+------------------------------------------------------------------+
-bool ComputeAndSend()
+bool ComputeAndSend(const int shift)
 {
    double close1=0.0;
-   if(!GetCloseAtShift(1, close1)) return false;
+   if(!GetCloseAtShift(shift, close1)) return false;
 
    double hi=0.0, lo=0.0;
-   if(!GetHighLowRangePrev(InpLookbackBars, hi, lo)) return false;
+   if(!GetHighLowRangePrev(shift, InpLookbackBars, hi, lo)) return false;
 
    double atr1=0.0, atrAvg=0.0;
-   if(!GetAtrAtShift(1, atr1)) return false;
+   if(!GetAtrAtShift(shift, atr1)) return false;
 
-   // Average ATR excluding shift=1 to avoid leaking current bar impact.
-   // Use shifts 2..(2+InpAtrAvgBars-1)
-   if(!GetAtrAverage(2, InpAtrAvgBars, atrAvg)) return false;
+   // Average ATR excluding the signal bar to avoid leaking its own impact.
+   // Use shifts (shift+1)..(shift+InpAtrAvgBars)
+   if(!GetAtrAverage(shift + 1, InpAtrAvgBars, atrAvg)) return false;
 
    double atrRatio = 0.0;
    if(atrAvg > 0.0) atrRatio = atr1 / atrAvg;
@@ -172,7 +195,7 @@ bool ComputeAndSend()
    if(direction == "LONG")  score = +1.0 * (strength / 100.0);
    if(direction == "SHORT") score = -1.0 * (strength / 100.0);
 
-   datetime barTime = GetBarTime(1);
+   datetime barTime = GetBarTime(shift);
    if(barTime == 0) return false;
 
    MqlDateTime dt;
@@ -191,14 +214,7 @@ bool ComputeAndSend()
    g_lastAtrRatio  = atrRatio;
 
    SignalPubConfig cfg;
-   cfg.enable        = InpSignalEnable;
-   cfg.apiUrl        = InpSignalApiUrl;
-   cfg.apiKey        = InpSignalApiKey;
-   cfg.httpTimeoutMs = InpHttpTimeoutMs;
-   cfg.eaId          = InpEaId;
-   cfg.eaName        = InpEaName;
-   cfg.eaVersion     = InpEaVersion;
-   cfg.maxRetries    = 2;
+   FillConfig(cfg);
 
    SignalPayload p;
    p.symbol        = _Symbol;
@@ -217,6 +233,9 @@ bool ComputeAndSend()
    g_lastSendText = (sent ? "OK" : "FAIL");
    return sent;
 }
+
+// SignalSendAtShift adapter: one symbol per chart, so the slot is unused.
+bool SendAtShift(const int slot, const int shift) { return ComputeAndSend(shift); }
 
 void ShowStatus()
 {
@@ -245,11 +264,13 @@ int OnInit()
    g_lastClosedBarTime = GetBarTime(1);
    g_pendingInitSend   = InpSendOnInit;
    g_initSendTries     = 0;
+   Signal_BackfillInit(g_backfill, InpBackfillOnInit);
 
    EventSetTimer(5);   // poll every 5s, independent of tick flow
 
    Print("Init OK. symbol=", _Symbol, " strategy=", InpStrategy,
          " sendOnInit=", (InpSendOnInit ? "true" : "false"),
+         " backfill=", (InpBackfillOnInit ? "true" : "false"),
          " lastClosedBar=", TimeToString(g_lastClosedBarTime),
          " url=", InpSignalApiUrl);
 
@@ -276,10 +297,18 @@ void Poll()
    }
 
    // On-attach publish: retry until indicator data is ready, then stop.
+   if(g_backfill.pending)
+   {
+      SignalPubConfig cfg;
+      FillConfig(cfg);
+      Signal_BackfillStep(g_backfill, cfg, _Symbol, InpTf, "D1", InpStrategy,
+                          InpBackfillMaxBars, SendAtShift, 0);
+   }
+
    if(g_pendingInitSend)
    {
       g_initSendTries++;
-      const bool okInit = ComputeAndSend();
+      const bool okInit = ComputeAndSend(1);
       if(okInit || g_initSendTries >= 10)
       {
          g_pendingInitSend = false;
@@ -288,11 +317,24 @@ void Poll()
       }
    }
 
-   if(t1 != g_lastClosedBarTime)
+   // Advance the bar ONLY on success, so a failed publish is retried instead of
+   // being lost for the day (2026-10-07: a reconnect blip at the D1 rollover cost
+   // 20 readings, while D1_Signal_Trend, which already did this, recovered).
+   // Poll also runs on every tick, so retries are spaced by time, not by call.
+   if(t1 != g_lastClosedBarTime && TimeLocal() >= g_nextBarTry)
    {
-      g_lastClosedBarTime = t1;
-      bool ok = ComputeAndSend();
-      Print("Signal computed and sent. ok=", ok, " symbol=", _Symbol);
+      g_barTries++;
+      const bool ok = ComputeAndSend(1);
+      Print("Signal computed and sent. ok=", ok, " symbol=", _Symbol, " try=", g_barTries);
+      if(ok || g_barTries >= 12)
+      {
+         if(!ok) Print("Publish FAILED after retries, skipping bar. symbol=", _Symbol);
+         g_lastClosedBarTime = t1;
+         g_barTries          = 0;
+         g_nextBarTry        = 0;
+      }
+      else
+         g_nextBarTry = TimeLocal() + 60;
    }
 
    ShowStatus();

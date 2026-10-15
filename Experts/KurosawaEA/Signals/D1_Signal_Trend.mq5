@@ -33,7 +33,9 @@ input double InpMaxSpreadPct       = 1.0;          // normalize EMA spread stren
 // ---- Signal API
 input bool   InpSignalEnable       = true;
 input string InpSignalApiUrl       = "https://1kpips.com/api/signals/set";
-input string InpSignalApiKey       = KUROSAWA_API_KEY;
+// The API key is NOT an input: MT5 writes every input value into chart
+// profiles, .set files and the tester journal in plain text. It is read
+// straight from KUROSAWA_API_KEY (git-ignored KurosawaSecrets.mqh).
 input string InpEaId               = "ea-signal-d1-dailytrend";
 input string InpEaName             = "D1_DailyTrend_Signal";
 input string InpEaVersion          = "0.2.0";
@@ -44,6 +46,11 @@ input int    InpHttpTimeoutMs      = 5000;
 // waiting for the next rollover. Sends the genuine values of that closed
 // bar - use it to verify the pipeline, or to backfill after downtime.
 input bool   InpSendOnInit         = false;
+
+// On attach, publish the closed bars MT5 missed while it was down: every bar in
+// the window the site has no reading for. Never one it already holds.
+input bool   InpBackfillOnInit     = true;
+input int    InpBackfillMaxBars    = 10;      // two trading weeks
 
 input int    InpTimerSeconds       = 5;    // poll interval
 input int    InpMaxSendsPerCycle   = 3;    // spread the rollover burst across cycles
@@ -58,6 +65,7 @@ datetime g_lastBar[];        // last closed bar already published
 bool     g_pendingInit[];    // on-attach publish still owed
 int      g_initTries[];
 int      g_barTries[];       // retries for the current unpublished bar
+SignalBackfill g_backfill[]; // closed bars missed while MT5 was down
 
 string   g_dir[];
 int      g_strength[];
@@ -148,12 +156,25 @@ bool EnsureHandles(const int i)
            g_hAdx[i]     != INVALID_HANDLE);
 }
 
+void FillConfig(SignalPubConfig &cfg)
+{
+   cfg.enable        = InpSignalEnable;
+   cfg.apiUrl        = InpSignalApiUrl;
+   cfg.apiKey        = KUROSAWA_API_KEY;
+   cfg.httpTimeoutMs = InpHttpTimeoutMs;
+   cfg.eaId          = InpEaId;
+   cfg.eaName        = InpEaName;
+   cfg.eaVersion     = InpEaVersion;
+   cfg.maxRetries    = 2;
+}
+
 //+------------------------------------------------------------------+
-// Compute + publish one symbol's last closed D1 bar
+// Compute + publish one closed D1 bar of one symbol: shift 1 on a
+// rollover, older shifts when backfilling after downtime.
 //| (JSON build + WebRequest + retry live in Signal_Post(),           |
 //|  ../Helpers/KurosawaSignalPublisher.mqh)                          |
 //+------------------------------------------------------------------+
-bool ComputeAndSend(const int i)
+bool ComputeAndSend(const int i, const int shift)
 {
    const string sym = g_sym[i];
 
@@ -161,12 +182,12 @@ bool ComputeAndSend(const int i)
    double emaFast1=0.0, emaSlow1=0.0;
    double adx1=0.0;
 
-   if(!GetCloseAtShift(sym, 1, close1)) return false;
-   if(!GetBufAtShift(g_hEmaFast[i], 0, 1, emaFast1)) return false;
-   if(!GetBufAtShift(g_hEmaSlow[i], 0, 1, emaSlow1)) return false;
+   if(!GetCloseAtShift(sym, shift, close1)) return false;
+   if(!GetBufAtShift(g_hEmaFast[i], 0, shift, emaFast1)) return false;
+   if(!GetBufAtShift(g_hEmaSlow[i], 0, shift, emaSlow1)) return false;
 
    // iADX buffer 0 is ADX in MQL5
-   if(!GetBufAtShift(g_hAdx[i], 0, 1, adx1)) return false;
+   if(!GetBufAtShift(g_hAdx[i], 0, shift, adx1)) return false;
 
    string direction = "FLAT";
 
@@ -201,7 +222,7 @@ bool ComputeAndSend(const int i)
    if(direction == "LONG")  score = +1.0 * (strength / 100.0);
    if(direction == "SHORT") score = -1.0 * (strength / 100.0);
 
-   datetime barTime = GetBarTime(sym, 1);
+   datetime barTime = GetBarTime(sym, shift);
    if(barTime == 0) return false;
 
    MqlDateTime dt;
@@ -219,14 +240,7 @@ bool ComputeAndSend(const int i)
    g_adx[i]      = adx1;
 
    SignalPubConfig cfg;
-   cfg.enable        = InpSignalEnable;
-   cfg.apiUrl        = InpSignalApiUrl;
-   cfg.apiKey        = InpSignalApiKey;
-   cfg.httpTimeoutMs = InpHttpTimeoutMs;
-   cfg.eaId          = InpEaId;
-   cfg.eaName        = InpEaName;
-   cfg.eaVersion     = InpEaVersion;
-   cfg.maxRetries    = 2;
+   FillConfig(cfg);
 
    SignalPayload p;
    p.symbol        = sym;
@@ -292,15 +306,25 @@ void Poll()
             g_send[i] = "not sent yet";
       }
 
+      // Spread the rollover burst so one timer callback never blocks long.
+      if(sentThisCycle >= InpMaxSendsPerCycle) continue;
+
+      if(g_backfill[i].pending)
+      {
+         SignalPubConfig cfg;
+         FillConfig(cfg);
+         if(Signal_BackfillStep(g_backfill[i], cfg, g_sym[i], InpTf, "D1", InpStrategy,
+                                InpBackfillMaxBars, ComputeAndSend, i))
+            sentThisCycle++;
+         if(sentThisCycle >= InpMaxSendsPerCycle) continue;
+      }
+
       const bool isNewBar = (t1 != g_lastBar[i]);
       const bool wantInit = g_pendingInit[i];
 
       if(!isNewBar && !wantInit) continue;
 
-      // Spread the rollover burst so one timer callback never blocks long.
-      if(sentThisCycle >= InpMaxSendsPerCycle) continue;
-
-      const bool ok = ComputeAndSend(i);
+      const bool ok = ComputeAndSend(i, 1);
       sentThisCycle++;
 
       if(isNewBar)
@@ -355,6 +379,7 @@ int OnInit()
    ArrayResize(g_pendingInit, g_count);
    ArrayResize(g_initTries,   g_count);
    ArrayResize(g_barTries,    g_count);
+   ArrayResize(g_backfill,    g_count);
    ArrayResize(g_dir,         g_count);
    ArrayResize(g_strength,    g_count);
    ArrayResize(g_adx,         g_count);
@@ -369,6 +394,7 @@ int OnInit()
       g_pendingInit[i] = InpSendOnInit;
       g_initTries[i]   = 0;
       g_barTries[i]    = 0;
+      Signal_BackfillInit(g_backfill[i], InpBackfillOnInit);
       g_dir[i]         = "N/A";
       g_strength[i]    = 0;
       g_adx[i]         = 0.0;
@@ -382,6 +408,7 @@ int OnInit()
 
    Print("Init OK. strategy=", InpStrategy, " symbols=", g_count,
          " sendOnInit=", (InpSendOnInit ? "true" : "false"),
+         " backfill=", (InpBackfillOnInit ? "true" : "false"),
          " url=", InpSignalApiUrl);
 
    Poll();   // act immediately, do not wait for a tick or the first timer
