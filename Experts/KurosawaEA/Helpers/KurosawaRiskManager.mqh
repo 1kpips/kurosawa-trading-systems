@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //| File: Helpers/KurosawaRiskManager.mqh                            |
 //| Type: Include Library                                            |
-//| Ver : 0.2.0                                                      |
+//| Ver : 0.3.0                                                      |
 //|                                                                  |
 //| Description                                                      |
 //| Centralized risk-guard utilities for the Kurosawa EA suite.      |
@@ -30,7 +30,8 @@
 struct DailyRiskState
 {
    int      day_of_year;        // day-of-year snapshot for the current "risk day"
-   double   day_start_equity;   // equity snapshot at start of day
+   double   day_start_equity;   // equity snapshot at start of day (persisted, see below)
+   datetime day_start_server;   // start of the risk day in SERVER time, for the deal-history query
    datetime last_trade_time;    // last time a trade was placed (cooldown)
    int      trades_today;       // count of trades placed today
 };
@@ -53,6 +54,83 @@ double _SafePct(const double numerator, const double denominator)
 }
 
 // ------------------------------------------------------------------
+// Persisted day-start equity
+// ------------------------------------------------------------------
+// The baseline lives in a terminal global variable, one per account per
+// trading day, so OnInit can no longer move it. It used to re-snapshot on
+// every OnInit - recompile, input change, timeframe change, restart - and
+// each of those handed the EA a fresh full daily loss allowance measured
+// from the already-drawn-down equity.
+//
+// The key is per ACCOUNT, not per EA: equity is account-wide, so the first
+// Kurosawa EA to see a new day fixes the baseline and every chart measures
+// from it. An EA attached mid-afternoon inherits the morning's number.
+//
+// Terminal globals survive a restart and expire after four weeks unread, so
+// old days clean themselves up. The tester emulates its own empty set per
+// run, so a backtest behaves exactly as before.
+
+string _DayEquityKey(const datetime t)
+{
+   MqlDateTime dt;
+   TimeToStruct(t, dt);
+   return StringFormat("KRS_DAYEQ_%I64d_%04d%02d%02d",
+                       AccountInfoInteger(ACCOUNT_LOGIN), dt.year, dt.mon, dt.day);
+}
+
+// Returns the stored baseline for the trading day of `t`, creating it from
+// current equity if none exists. Returns 0 - and stores nothing - while the
+// terminal is not yet connected, so a 0 is never pinned as the day's baseline.
+double _DayStartEquity(const datetime t)
+{
+   if(AccountInfoInteger(ACCOUNT_LOGIN) == 0) return 0.0;
+
+   const string k = _DayEquityKey(t);
+   if(GlobalVariableCheck(k))
+   {
+      const double stored = GlobalVariableGet(k);
+      if(stored > 0.0) return stored;
+   }
+
+   const double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(eq > 0.0) GlobalVariableSet(k, eq);
+   return eq;
+}
+
+// Midnight of `nowTime`'s day, expressed on the server clock. `nowTime` is the
+// caller's trading-day clock (server time plus a whole-hour offset); the
+// offset is recovered from the difference rather than imported, so this file
+// stays self-contained.
+datetime _DayStartServer(const datetime nowTime)
+{
+   const datetime server = TimeTradeServer();
+   const long offsetSec  = (long)MathRound((double)(nowTime - server) / 3600.0) * 3600;
+   return (datetime)(nowTime - (nowTime % 86400) - offsetSec);
+}
+
+// Closed P/L on the whole account since `fromServer`: profit + swap + commission
+// of every exit deal, every magic. Same definition as Portfolio_RealizedToday.
+double _RealizedSince(const datetime fromServer)
+{
+   if(fromServer <= 0) return 0.0;
+   if(!HistorySelect(fromServer, TimeTradeServer() + 60)) return 0.0;
+
+   double sum = 0.0;
+   const int n = HistoryDealsTotal();
+   for(int i = 0; i < n; i++)
+   {
+      const ulong t = HistoryDealGetTicket(i);
+      if(t == 0) continue;
+      const long entry = HistoryDealGetInteger(t, DEAL_ENTRY);
+      if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT && entry != DEAL_ENTRY_OUT_BY) continue;
+      sum += HistoryDealGetDouble(t, DEAL_PROFIT)
+           + HistoryDealGetDouble(t, DEAL_SWAP)
+           + HistoryDealGetDouble(t, DEAL_COMMISSION);
+   }
+   return sum;
+}
+
+// ------------------------------------------------------------------
 // State initialization / reset
 // ------------------------------------------------------------------
 
@@ -60,7 +138,8 @@ double _SafePct(const double numerator, const double denominator)
 void Risk_Init(DailyRiskState &st, const datetime nowTime)
 {
    st.day_of_year      = _DayOfYear(nowTime);
-   st.day_start_equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   st.day_start_equity = _DayStartEquity(nowTime);
+   st.day_start_server = _DayStartServer(nowTime);
    st.last_trade_time  = 0;
    st.trades_today     = 0;
 }
@@ -71,7 +150,8 @@ void Risk_EnsureBaseline(DailyRiskState &st, const datetime nowTime)
    if(st.day_start_equity <= 0.0)
    {
       st.day_of_year      = _DayOfYear(nowTime);
-      st.day_start_equity = AccountInfoDouble(ACCOUNT_EQUITY);
+      st.day_start_equity = _DayStartEquity(nowTime);
+      st.day_start_server = _DayStartServer(nowTime);
    }
 
    if(st.day_of_year <= 0)
@@ -81,6 +161,8 @@ void Risk_EnsureBaseline(DailyRiskState &st, const datetime nowTime)
 // Resets daily baseline when a new day is detected.
 // - Resets trades_today
 // - Optionally resets loss streak if your EA wants that behavior
+// Same day with no baseline yet (OnInit ran before the terminal connected):
+// fills the baseline and keeps the counters, so the guard is not off all day.
 bool DailyResetIfNewDay(
    DailyRiskState &st,
    const datetime nowTime,
@@ -90,10 +172,15 @@ bool DailyResetIfNewDay(
 {
    const int d = _DayOfYear(nowTime);
    if(d == st.day_of_year)
+   {
+      if(st.day_start_equity <= 0.0)
+         st.day_start_equity = _DayStartEquity(nowTime);
       return false;
+   }
 
    st.day_of_year      = d;
-   st.day_start_equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   st.day_start_equity = _DayStartEquity(nowTime);
+   st.day_start_server = _DayStartServer(nowTime);
    st.trades_today     = 0;
 
    if(resetLossStreakDaily)
@@ -116,18 +203,30 @@ double Risk_DailyDrawdownPercent(const DailyRiskState &st, const double currentE
    return _SafePct(ddMoney, st.day_start_equity);
 }
 
+// Realized loss today as a percent of day_start_equity. Positive = a loss.
+double Risk_DailyRealizedLossPercent(const DailyRiskState &st)
+{
+   if(st.day_start_equity <= 0.0) return 0.0;
+   return _SafePct(-_RealizedSince(st.day_start_server), st.day_start_equity);
+}
+
 // Returns true if daily loss limit has not been breached.
 // If dailyLossLimitPercent <= 0, the gate is disabled.
+//
+// Measured on REALIZED P/L (closed deals today, whole account), not equity.
+// Equity counts floating P/L, so an open winner on another chart hid losses
+// already booked - and an open loser elsewhere blocked an EA that had lost
+// nothing. The gate runs only while this EA is flat, so in the tester (one
+// instance, no other positions) the two agree except on a day that opened
+// with a position carried over midnight: its realized result now counts in
+// full, where equity only counted the move since the snapshot.
 bool DailyLossLimitOK(const DailyRiskState &st, const double dailyLossLimitPercent)
 {
    if(dailyLossLimitPercent <= 0.0) return true;
    if(st.day_start_equity <= 0.0)   return true;
 
-   const double eq = AccountInfoDouble(ACCOUNT_EQUITY);
-   const double ddPct = Risk_DailyDrawdownPercent(st, eq);
-
-   // Block once drawdown reaches the limit
-   return (ddPct < dailyLossLimitPercent);
+   // Block once the realized loss reaches the limit
+   return (Risk_DailyRealizedLossPercent(st) < dailyLossLimitPercent);
 }
 
 // ------------------------------------------------------------------
