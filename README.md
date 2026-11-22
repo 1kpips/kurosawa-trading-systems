@@ -6,6 +6,19 @@ Everything in this repository is published — the strategy modules, the engines
 
 ---
 
+## Results, Method and a Course
+
+The code is here; the evidence for it is on **[1kpips.com](https://1kpips.com/en)**:
+
+- **[Presets](https://1kpips.com/en/presets)** — every tune in this repository with its status, its parameters and every backtest filed for it, rejected ones included.
+- **[Live track record](https://1kpips.com/en/performance)** — what the engines do with real money, filed by `KurosawaTrack.mqh` as each trade closes.
+- **[Tokyo Fix and Gotobi Days](https://1kpips.com/en/blog/tokyo-fix-gotobi)** — what `TokyoFixEA` trades and why: the one mechanism that has held up in our testing.
+- **[How to Backtest MT5 EAs the Right Way](https://1kpips.com/en/blog/how-to-backtest-mt5-eas-the-right-way)** — the testing method behind every result on the site.
+- **[Build Your Own MT5 Expert Advisor](https://1kpips.com/en/learn)** — a ten-module course that builds an EA the way this repository is built.
+- **[Research log](https://1kpips.com/en/research)** — every promotion, rejection and backtest session, dated.
+
+---
+
 ## Design Philosophy
 
 ### 1. Closed-Bar Logic Only
@@ -44,13 +57,17 @@ degradation limits, parameter stability, honest costs, build match, drawdown, an
 ```text
 Experts/KurosawaEA/
 ├── Engines/                 # MT5 lifecycle + execution; strategy-agnostic
-│   ├── RangeRevertEA.mq5    # proven (M15, European morning, long only) - live
+│   ├── TokyoFixEA.mq5       # proven (yen pairs, Tokyo fix on gotobi and month-end days) - live
+│   ├── RangeRevertEA.mq5    # regime tier (M15, European morning, long only) - live at minimum lot
+│   ├── LondonFixEA.mq5      # GBPUSD run retired, EURGBP rejected
 │   ├── TrendEA.mq5          # rejected: entry has no edge in either session
 │   ├── TrendPullbackEA.mq5  # rejected
 │   ├── BreakoutEA.mq5       # rejected: London-range break in NY chops
 │   ├── FadeEA.mq5           # candidate: fades the D1 Breakout reading (thin)
 │   └── Archived/            # retired engines, kept for the record
 ├── Strategies/              # closed-bar signal judgment only, no execution
+│   ├── TokyoFix.mqh         # clock-driven: the fix time, the day, the side
+│   ├── LondonFix.mqh
 │   ├── RangeRevert.mqh
 │   ├── Trend.mqh
 │   ├── TrendPullback.mqh
